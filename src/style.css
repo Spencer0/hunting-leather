@@ -12,7 +12,8 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d10; font-family: 'Alegreya Sans', system-ui, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
 #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #ui { position: fixed; inset: 0; pointer-events: none; font-size: 17px; }
-#ui button { font-family: inherit; }
+#ui button { font-family: 'Alegreya Sans', sans-serif; }
+#ui .btn.big, #ui .tab { font-family: 'Cinzel', serif; }
 h1, h2, h3, .cz { font-family: 'Cinzel', serif; margin: 0; letter-spacing: .03em; }
 .hidden { display: none !important; }
 
@@ -165,7 +166,7 @@ input[type=range] { accent-color: #b8780a; width: 220px; }
 .opt { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 8px 4px; font-weight: 700; border-bottom: 1px dashed #b8904a; }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; align-items: center; }
 .keys kbd { background: #fff; border: 2px solid #5a3a1c; border-radius: 7px; padding: 1px 8px; font: 700 14px 'Alegreya Sans'; box-shadow: 0 2px 0 #5a3a1c; white-space: nowrap; justify-self: start; }
-.mapwrap { position: relative; width: 470px; height: 470px; flex: none; border: 4px solid #5a3a1c; border-radius: 14px; overflow: hidden; box-shadow: inset 0 0 30px #0006; }
+.mapwrap { position: relative; height: min(470px, 100%); aspect-ratio: 1; flex: none; border: 4px solid #5a3a1c; border-radius: 14px; overflow: hidden; box-shadow: inset 0 0 30px #0006; }
 .mapwrap canvas { width: 100%; height: 100%; display: block; }
 
 /* ---------- title ---------- */
@@ -192,3 +193,5 @@ input[type=range] { accent-color: #b8780a; width: 220px; }
 #credits p { margin: 4px; font-size: 20px; }
 @keyframes roll { to { transform: translateY(-100%); top: 0; } }
 #credits .btn { position: absolute; right: 24px; bottom: 24px; }
+
+#clicker { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); padding: 6px 16px; font-weight: 700; animation: blink 1.6s ease-in-out infinite; }

@@ -5,7 +5,7 @@ import { audio } from './audio';
 import { G } from './ctx';
 import { GEAR, ITEMS, MAX_LEVEL, PERKS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, TIPS, WEAPONS, ZONES, ZONE_ORDER, xpForLevel, type GearSlot, type WeaponDef } from './data';
 import { icon } from './icons';
-import { input, lockPointer, unlockPointer, usingPad } from './input';
+import { input, lockPointer, locked, unlockPointer, usingPad } from './input';
 import { RANK_TITLES, S, activeWeapon, addItem, ammoCap, buyPrice, canBuyPerk, capacity, count, countItem, deleteSlot, maxHp, maxStamina, perk, readSlot, saveSettings, sellValue, settings, splitKey, totalWeight, zoneIndex, type Save } from './state';
 import { MAP_SPAN } from './terrain';
 import { clamp, fmtTime, pick } from './util';
@@ -43,6 +43,7 @@ export class UI {
         <div class="statline"><span id="xpt" class="muted"></span><span class="wt" id="wt"></span></div></div></div>
       <div id="wname"></div><div id="weapons" class="hud-box"></div>
       <canvas id="cross" width="160" height="160"></canvas><div id="hitm"></div>
+      <div id="clicker" class="hud-box hidden">Click to look around</div>
       <div id="prompt" class="hud-box hidden"></div><div id="toasts"></div><div id="hint" class="hud-box off"></div>
       <div id="dmg"></div><div id="banner"><h1></h1><div class="rule"></div><p></p></div></div>`);
     this.root.append(this.hud);
@@ -50,7 +51,7 @@ export class UI {
     this.root.append(this.fadeEl);
     const q = (s: string) => this.hud.querySelector(s) as HTMLElement;
     this.promptEl = q('#prompt'); this.hintEl = q('#hint'); this.bannerEl = q('#banner'); this.toastsEl = q('#toasts'); this.dmgEl = q('#dmg'); this.bossEl = q('#boss');
-    for (const id of ['objective', 'eye', 'rank', 'hpt', 'gold', 'xpt', 'wt', 'wname', 'weapons', 'clock', 'lowhp', 'hurt', 'hitm', 'cross']) this.els[id] = q('#' + id);
+    for (const id of ['clicker', 'objective', 'eye', 'rank', 'hpt', 'gold', 'xpt', 'wt', 'wname', 'weapons', 'clock', 'lowhp', 'hurt', 'hitm', 'cross']) this.els[id] = q('#' + id);
     this.mini = (q('#mini canvas') as HTMLCanvasElement).getContext('2d')!;
     this.comp = (q('#compass canvas') as HTMLCanvasElement).getContext('2d')!;
     this.cross = (q('#cross') as HTMLCanvasElement).getContext('2d')!;
@@ -119,6 +120,7 @@ export class UI {
   update(dt: number) {
     const p = G.player, e = this.els;
     if (this.hintT > 0) { this.hintT -= dt; if (this.hintT <= 0) this.hintEl.classList.add('off'); }
+    this.set('lock', locked || usingPad || this.isOpen || p.frozen ? 0 : 1, (v) => e.clicker.classList.toggle('hidden', v === '0'));
     const hp = Math.ceil(S.hp), mh = maxHp();
     this.set('hp', `${hp}/${mh}`, (v) => { e.hpt.textContent = `♥ ${v}`; (this.hud.querySelector('.bar.hp i') as HTMLElement).style.width = `${(hp / mh) * 100}%`; });
     this.set('st', Math.round((p.stamina / maxStamina()) * 50), (v) => { (this.hud.querySelector('.bar.st i') as HTMLElement).style.width = `${+v * 2}%`; });
@@ -132,7 +134,7 @@ export class UI {
     const w = totalWeight(), cap = capacity();
     this.set('wt', `${w}/${cap}`, (v) => { e.wt.textContent = `Pack ${v}`; e.wt.classList.toggle('over', w > cap); });
     this.set('obj', G.game.objective() + (S.perkPoints ? `|${S.perkPoints}` : ''), () => { e.objective.querySelector('span')!.innerHTML = G.game.objective() + (S.perkPoints ? `<br><span style="color:#ffe070">★ ${S.perkPoints} skill point${S.perkPoints > 1 ? 's' : ''} to spend (Tab)</span>` : ''); });
-    this.set('clock', `${Math.floor(S.time * 6)}|${S.day}`, () => { e.clock.innerHTML = `${icon(G.env.night > 0.5 ? 'moon' : 'sun', '#ffd866', 18)} Day ${S.day} · ${fmtTime(S.time)}`; });
+    this.set('clock', `${Math.floor(S.time * 6)}|${S.day}|${G.env.night > 0.5}`, () => { e.clock.innerHTML = `${icon(G.env.night > 0.5 ? 'moon' : 'sun', '#ffd866', 18)} Day ${S.day} · ${fmtTime(S.time)}`; });
     e.lowhp.style.opacity = String(hp < mh * 0.3 ? 0.5 + Math.sin(G.time * 5) * 0.3 : 0);
     // weapons
     const act = activeWeapon();
@@ -540,7 +542,7 @@ export class UI {
       const z = G.zone.def;
       col.append($(`<div class="detail" style="flex:1"><h3>${z.name}</h3><p><i>${z.subtitle}</i></p>
         <div class="kv"><span>${icon('map', '#ffe070', 18)} Town</span><span>${z.town}</span></div><div class="kv"><span>Game</span><span style="text-align:right;max-width:200px">${[...new Set(z.spawns.map((s) => SPECIES[s[0]].name))].join(', ')}</span></div>
-        <h3 class="sec" style="margin-top:14px">Legend</h3><p>● <span style="color:#b8900a">Town</span> &nbsp; ● <span style="color:#d06a10">Camp</span> &nbsp; ● <span style="color:#c8483a">Unskinned kill</span> &nbsp; ● <span style="color:#9040c0">Legendary lair</span></p>
+        <h3 class="sec" style="margin-top:14px">Legend</h3><p><span style="color:#d8a800">●</span> Town &nbsp; <span style="color:#ff9a40">●</span> Camp &nbsp; <span style="color:#e86a5a">●</span> Unskinned kill &nbsp; <span style="color:#b050e0">●</span> Legendary lair</p>
         <h3 class="sec">Regions</h3>${ZONE_ORDER.map((id) => `<div class="kv"><span>${ZONES[id].name}</span><span>${S.level >= ZONES[id].rank ? (S.legends.includes(ZONES[id].legendary) ? '★ legend ended' : 'open') : `Rank ${ZONES[id].rank}`}</span></div>`).join('')}</div>`));
     }
   }
@@ -620,9 +622,10 @@ export class UI {
     this.root.append(this.titleEl);
     const go = () => { window.removeEventListener('keydown', go); window.removeEventListener('mousedown', go); audio.resume(); audio.play('ui_open'); this.titleMenu(); };
     window.addEventListener('keydown', go); window.addEventListener('mousedown', go);
-    this.titleGo = go;
+    this.titleGo = () => { this.titleGo = null; go(); };
   }
   private titleGo: (() => void) | null = null;
+  titlePress() { if (this.titleGo && this.titleEl?.querySelector('.press')) this.titleGo(); }
   titleMenu() {
     if (!this.titleEl) return;
     const m = this.titleEl.querySelector('.menu') as HTMLElement;

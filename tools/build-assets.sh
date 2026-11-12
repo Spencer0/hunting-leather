@@ -36,3 +36,7 @@ for d in kenney-rpg-audio kenney-ui-audio kenney-impact-sounds kenney-foley-soun
   find "$RAW/$d" -name '*.ogg' -exec cp -n {} "$OUT/audio/" \;
 done
 du -sh "$OUT"/*
+# keep only what the game actually requests (list recorded from a real boot)
+if [ -f "$(dirname "$0")/used-assets.txt" ]; then
+  (cd "$OUT" && find . -type f | sed 's#^\./##' | sort | comm -23 - <(sort "$(dirname "$0")/used-assets.txt") | while read -r f; do rm -f "$f"; done)
+fi

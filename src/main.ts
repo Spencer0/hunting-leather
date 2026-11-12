@@ -96,6 +96,7 @@ document.addEventListener('pointerlockchange', () => {
 });
 canvas.addEventListener('click', () => { if (G.game?.playing && !ui.isOpen) { lockPointer(); audio.resume(); } });
 
+window.addEventListener('beforeunload', () => { if (G.game?.playing && !G.player.dead) G.game.save(true); });
 const clock = new THREE.Clock();
 let titleAng = 0;
 const focus = new THREE.Vector3();
@@ -111,6 +112,7 @@ function frame() {
     camera.position.set(t.town.x + Math.sin(titleAng) * 62, t.town.y + 17, t.town.z + Math.cos(titleAng) * 62);
     focus.set(t.town.x, t.town.y + 5, t.town.z);
     camera.lookAt(focus);
+    if (input.anyHit()) ui.titlePress();
     ui.nav();
     if (input.uiBack() && ui.isOpen) ui.close(true), ui.titleMenu();
   } else {
@@ -123,10 +125,12 @@ function frame() {
       if (input.pauseHit()) ui.open('pause');
       else if (input.menuHit()) { audio.play('ui_open'); ui.open('journal'); }
       else if (input.mapHit()) { audio.play('ui_open'); ui.open('journal'); (ui as any).tab = 'Map'; ui.refresh(); }
-      p.update(dt);
-      G.animals.update(dt);
-      G.shots.update(dt);
-      game.update(dt);
+      if (!(window as any).__pause) {
+        p.update(dt);
+        G.animals.update(dt);
+        G.shots.update(dt);
+        game.update(dt);
+      }
     }
     focus.copy(p.pos);
     ui.update(dt);
@@ -136,11 +140,17 @@ function frame() {
   zone.update(dt, G.time, camera.position, focus, G.env.night, G.env.fog.color, G.env.sunDir, G.env.sun.intensity);
   audio.setListener(camera.position, p.camYaw);
   audio.update(dt);
+  const oc = (window as any).__cam as { pos: number[]; look: number[]; fov?: number } | undefined;
+  if (oc) { camera.position.set(oc.pos[0], oc.pos[1], oc.pos[2]); camera.fov = oc.fov ?? 40; camera.updateProjectionMatrix(); camera.lookAt(oc.look[0], oc.look[1], oc.look[2]); }
   renderer.render(scene, camera);
   endFrame();
   (window as any).__frames = ((window as any).__frames ?? 0) + 1;
 }
 (window as any).__G = G;
+// headless test hook: advance the simulation without rendering
+(window as any).__step = (n: number, dt = 1 / 30) => {
+  for (let i = 0; i < n; i++) { G.time += dt; G.player.update(dt); G.animals.update(dt); G.shots.update(dt); G.game.update(dt); (G.renderer.info.render as any).frame++; }
+};
 (window as any).__S = () => S;
 boot();
 void locked;

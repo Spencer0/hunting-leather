@@ -66,6 +66,14 @@ export function pollInput() {
     break;
   }
 }
+export function rumble(strong: number, ms: number) {
+  try {
+    for (const p of navigator.getGamepads?.() ?? []) {
+      const act = (p as unknown as { vibrationActuator?: { playEffect?: (t: string, o: object) => Promise<unknown> } } | null)?.vibrationActuator;
+      act?.playEffect?.('dual-rumble', { duration: ms, strongMagnitude: strong, weakMagnitude: strong * 0.6 })?.catch?.(() => {});
+    }
+  } catch { /* unsupported */ }
+}
 export function endFrame() {
   pressed.clear();
   mdx = 0; mdy = 0; wheel = 0;
@@ -77,17 +85,19 @@ const padHit = (i: number) => !!padNow[i] && !padPrev[i];
 const padUp = (i: number) => !padNow[i] && !!padPrev[i];
 
 // Standard gamepad mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 Back, 9 Start, 10 LS, 11 RS, 12-15 dpad U D L R
+export const force: { aim?: boolean; fire?: boolean; fireHit?: boolean; my?: number } = {};
+(window as any).__force = force;
 export const input = {
   moveX: () => { let v = padAxes[0]; if (keys.has('KeyD') || keys.has('ArrowRight')) v += 1; if (keys.has('KeyA') || keys.has('ArrowLeft')) v -= 1; return Math.max(-1, Math.min(1, v)); },
-  moveY: () => { let v = -padAxes[1]; if (keys.has('KeyW') || keys.has('ArrowUp')) v += 1; if (keys.has('KeyS') || keys.has('ArrowDown')) v -= 1; return Math.max(-1, Math.min(1, v)); },
+  moveY: () => { let v = -padAxes[1]; if (keys.has('KeyW') || keys.has('ArrowUp')) v += 1; if (force.my) v += force.my; if (keys.has('KeyS') || keys.has('ArrowDown')) v -= 1; return Math.max(-1, Math.min(1, v)); },
   lookX: (dt: number) => mdx * 0.0023 * settings.sens + padAxes[2] * 2.6 * dt * settings.sens,
   lookY: (dt: number) => (mdy * 0.0023 * settings.sens + padAxes[3] * 1.8 * dt * settings.sens) * (settings.invertY ? -1 : 1),
   sprint: () => keys.has('ShiftLeft') || keys.has('ShiftRight') || pad(10) || pad(1),
   crouchHit: () => pressed.has('KeyC') || pressed.has('ControlLeft') || padHit(11),
   jumpHit: () => pressed.has('Space') || padHit(0),
-  aim: () => mouse[2] || pad(6),
-  fire: () => mouse[0] || pad(7),
-  fireHit: () => mousePressed[0] || padHit(7),
+  aim: () => mouse[2] || pad(6) || !!force.aim,
+  fire: () => mouse[0] || pad(7) || !!force.fire,
+  fireHit: () => mousePressed[0] || padHit(7) || !!force.fireHit,
   fireUp: () => mouseReleased[0] || padUp(7),
   interactHit: () => pressed.has('KeyE') || padHit(2),
   interact: () => keys.has('KeyE') || pad(2),

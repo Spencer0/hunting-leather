@@ -317,7 +317,7 @@ export function buildTerrain(zone: ZoneDef): Terrain {
   lair.y = height(lair.x, lair.z);
 
   // --- map image ---
-  const MS = 256;
+  const MS = 384;
   const mapCanvas = document.createElement('canvas');
   mapCanvas.width = mapCanvas.height = MS;
   const mg = mapCanvas.getContext('2d')!;

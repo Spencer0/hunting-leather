@@ -129,6 +129,6 @@ export const MODEL_MANIFEST = {
     'building_stables_blue', 'building_windmill_blue', 'building_watchtower_blue', 'building_lumbermill_blue', 'building_archeryrange_blue', 'building_church_blue', 'building_townhall_blue',
     'barrel', 'crate_A_big', 'crate_B_small', 'crate_long_A', 'haybale', 'sack', 'target', 'weaponrack', 'wheelbarrow', 'trough', 'flag_blue', 'flag_red', 'flag_green', 'flag_yellow', 'cart_merchant', 'cart', 'bucket_arrows', 'resource_lumber', 'fence_wood_straight', 'pallet',
   ].map((n) => 'town/' + n),
-  props: ['Stall_Empty', 'Stall_Cart_Empty', 'Workbench', 'Workbench_Drawers', 'Anvil_Log', 'Barrel', 'Barrel_Apples', 'Crate_Wooden', 'Banner_1', 'Banner_2', 'Dummy', 'Bag', 'Chest_Wood', 'Bench', 'Table_Large', 'WeaponStand', 'Peg_Rack', 'Stool', 'FarmCrate_Apple', 'Torch_Metal', 'k_campfire-pit', 'k_tent', 'k_bedroll', 'k_signpost', 'k_tree-log'].map((n) => 'props/' + n),
+  props: ['Stall_Empty', 'Stall_Cart_Empty', 'Workbench', 'Workbench_Drawers', 'Anvil_Log', 'Barrel', 'Barrel_Apples', 'Crate_Wooden', 'Banner_1', 'Banner_2', 'Dummy', 'Bag', 'Chest_Wood', 'Bench', 'Table_Large', 'WeaponStand', 'Peg_Rack', 'Stool', 'FarmCrate_Apple', 'Torch_Metal', 'k_campfire-pit', 'k_bedroll', 'k_signpost', 'k_tree-log'].map((n) => 'props/' + n),
 };
 export const ALL_MODELS = Object.values(MODEL_MANIFEST).flat();

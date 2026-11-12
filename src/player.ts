@@ -4,7 +4,7 @@ import { clips, model } from './assets';
 import { audio } from './audio';
 import { G } from './ctx';
 import { WEAPONS, type WeaponDef } from './data';
-import { input } from './input';
+import { input, rumble } from './input';
 import { S, activeWeapon, capacity, count, defense, drawMult, gear, maxHp, maxStamina, perk, settings, stealthMult, totalWeight } from './state';
 import { WATER_Y, edgeDist } from './terrain';
 import { clamp, damp, dampAngle, lerp } from './util';
@@ -135,6 +135,7 @@ export class Player {
     _v.copy(this.pos).sub(from).setY(0).normalize();
     this.vel.x += _v.x * 7; this.vel.z += _v.z * 7;
     audio.play('hurt');
+    rumble(0.9, 260);
     G.ui.hurtFlash();
     this.drawing = false; this.draw = 0;
     if (this.busy) { this.busy.cancel?.(); this.busy = null; }
@@ -306,10 +307,17 @@ export class Player {
       this.chest.quaternion.premultiply(_q.clone().invert().multiply(_q2).multiply(_q));
     }
     if (this.nocked) this.nocked.visible = this.drawing && w?.kind === 'bow';
+    if (w?.kind === 'bow' && this.weaponObj) {
+      // carry the bow upright at the side when not aiming
+      this.bowBlend = damp(this.bowBlend, this.aiming || this.upperHold > 0 ? 0 : 1, 10, dt);
+      this.weaponObj.rotation.x = this.bowBlend * 1.35;
+    }
 
     this.updateCamera(dt, w);
   }
 
+  private hands(w: WeaponDef) { return w.model === 'crossbow_1handed' ? '1H' : '2H'; }
+  private bowBlend = 0;
   private stepSound() {
     const z = G.zone;
     if (z.inTown(this.pos, -8) || z.terrain.pathAt(this.pos.x, this.pos.z) > 0.6) return z.def.snow ? 'step_snow' : 'step_dirt';
@@ -375,8 +383,8 @@ export class Player {
     }
     G.shots.fire(origin, dir, w, power);
     this.shotLock = w.kind === 'bow' ? 0.35 : 0.3;
-    if (w.kind === 'bow') { audio.play('bow_release', { volume: 0.5 + power * 0.4 }); this.upperHold = 0.35; this.play(this.upper, 'Ranged_Bow_Release_U', 0.04, true, 1.4); }
-    else if (w.kind === 'crossbow') { audio.play('xbow_fire'); this.upperHold = 0.3; this.play(this.upper, 'Ranged_2H_Shoot_U', 0.04, true, 1.3); G.shake = Math.min(1, G.shake + 0.25); }
+    if (w.kind === 'bow') { rumble(0.25, 80); audio.play('bow_release', { volume: 0.5 + power * 0.4 }); this.upperHold = 0.35; this.play(this.upper, 'Ranged_Bow_Release_U', 0.04, true, 1.4); }
+    else if (w.kind === 'crossbow') { audio.play('xbow_fire'); this.upperHold = 0.3; this.play(this.upper, `Ranged_${this.hands(w)}_Shoot_U`, 0.04, true, 1.3); rumble(0.5, 120); G.shake = Math.min(1, G.shake + 0.25); }
     else audio.play('throw', { volume: 0.7 });
     this.noise = Math.max(this.noise, w.kind === 'crossbow' ? 1.2 : w.kind === 'bow' ? 0.7 : 0.4);
   }
@@ -400,8 +408,8 @@ export class Player {
     if (this.busy) up = 'Working_A';
     else if (w?.kind === 'bow' && this.drawing) { if (this.draw >= 1) up = 'Ranged_Bow_Aiming_Idle'; else return; }
     else if (w?.kind === 'bow' && this.aiming) up = 'Ranged_Bow_Idle';
-    else if (w?.kind === 'crossbow' && this.reload > 0) { up = 'Ranged_2H_Reload'; us = 1; }
-    else if (w?.kind === 'crossbow' && this.aiming) up = 'Ranged_2H_Aiming';
+    else if (w?.kind === 'crossbow' && this.reload > 0) { up = `Ranged_${this.hands(w)}_Reload`; us = 1; }
+    else if (w?.kind === 'crossbow' && this.aiming) up = `Ranged_${this.hands(w)}_Aiming`;
     else if (w?.kind === 'thrown' && this.throwT >= 0) return;
     if (up !== lo) us = 1;
     this.play(this.upper, up + '_U', 0.14, false, us);
@@ -410,8 +418,8 @@ export class Player {
   private updateCamera(dt: number, w: WeaponDef | null) {
     const cam = G.camera, t = G.zone.terrain;
     const aim = this.aiming;
-    this.camDist = damp(this.camDist, aim ? 2.1 : this.crouching ? 3.6 : 4.5, 8, dt);
-    this.camSide = damp(this.camSide, aim ? 0.62 : 0.35, 8, dt);
+    this.camDist = damp(this.camDist, aim ? 2.7 : this.crouching ? 4.0 : 5.2, 8, dt);
+    this.camSide = damp(this.camSide, aim ? 0.95 : 0.35, 8, dt);
     const zoom = aim ? (w?.kind === 'crossbow' ? 36 : w?.kind === 'bow' ? 44 - this.draw * 6 : 50) : 58;
     this.fov = damp(this.fov, zoom, 9, dt);
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
@@ -420,7 +428,7 @@ export class Player {
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const fwd = _f.set(-Math.sin(yaw) * cp, -sp, -Math.cos(yaw) * cp);
     const target = _v2.copy(this.pos);
-    target.y += (this.crouching ? 1.05 : 1.5) + (this.dead ? -0.6 : 0);
+    target.y += (this.crouching ? 1.15 : 1.62) + (aim ? 0.12 : 0) + (this.dead ? -0.6 : 0);
     target.x += Math.cos(yaw) * this.camSide; target.z += -Math.sin(yaw) * this.camSide;
     // pull the camera in if terrain blocks it
     let dist = this.camDist;

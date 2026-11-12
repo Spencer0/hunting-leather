@@ -1,6 +1,7 @@
 // Zone assembly: terrain, vegetation, grass, water, town, camps, colliders, interactables, NPCs.
 import * as THREE from 'three';
 import { clips, model, rawModel } from './assets';
+import { icon } from './icons';
 import type { ZoneDef } from './data';
 import { CELL, PLAY, TOWN_R, WATER_Y, WORLD, buildTerrain, edgeDist, type Terrain } from './terrain';
 import { Noise, clamp, rng, smooth, weighted } from './util';
@@ -93,6 +94,8 @@ export class Zone {
   fires: { pos: THREE.Vector3; sprites: THREE.Sprite[]; light: THREE.PointLight }[] = [];
   private grid = new Map<number, Collider[]>();
   private grassChunks: THREE.InstancedMesh[] = [];
+  private lamps: THREE.PointLight[] = [];
+  private markers: THREE.Sprite[] = [];
   private water: THREE.Mesh;
   private disposables: { dispose(): void }[] = [];
   noise: Noise;
@@ -153,10 +156,10 @@ export class Zone {
     const src = rawModel(path);
     if (!src || !items.length) return;
     src.updateMatrixWorld(true);
-    const CH = 130;
+    const CH = 90;
     const buckets = new Map<number, typeof items>();
     for (const it of items) {
-      const k = Math.floor((it.x + WORLD / 2) / CH) * 16 + Math.floor((it.z + WORLD / 2) / CH);
+      const k = Math.floor((it.x + WORLD / 2) / CH) * 32 + Math.floor((it.z + WORLD / 2) / CH);
       let b = buckets.get(k);
       if (!b) buckets.set(k, (b = []));
       b.push(it);
@@ -171,10 +174,19 @@ export class Zone {
         mat = srcMat.clone();
         const leafy = /lea|flower|petal|grass|plant|fern|bush/i.test(srcMat.name);
         const tint = leafy ? opt.leafTint ?? opt.tint : opt.tint;
-        if (tint !== undefined) mat.color.multiply(new THREE.Color(tint));
-        if (opt.sway && leafy) {
+        // foliage is recoloured from its luminance so green textures can turn amber, gold or frost-blue
+        const recolor = leafy && tint !== undefined && tint !== 0xffffff && /lea|bush|fern|plant/i.test(srcMat.name) ? new THREE.Color(tint) : null;
+        if (tint !== undefined && !recolor) mat.color.multiply(new THREE.Color(tint));
+        if ((opt.sway && leafy) || recolor) {
           mat.onBeforeCompile = (sh) => {
             sh.uniforms.uTime = uTime;
+            if (recolor) {
+              sh.uniforms.uTint = { value: recolor };
+              sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uTint;').replace(
+                '#include <map_fragment>',
+                '#include <map_fragment>\nfloat lum = dot(diffuseColor.rgb, vec3(0.3, 0.6, 0.1));\ndiffuseColor.rgb = mix(diffuseColor.rgb, uTint * (0.35 + lum * 2.6), 0.88);',
+              );
+            }
             sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;').replace(
               '#include <begin_vertex>',
               `#include <begin_vertex>
@@ -217,7 +229,7 @@ export class Zone {
     const forest = (x: number, z: number) => noise.fbm(x * 0.011 + 3, z * 0.011 - 7, 3);
 
     // trees
-    const want = Math.round(430 * def.treeDensity * (quality === 0 ? 0.7 : 1));
+    const want = Math.round(350 * def.treeDensity * (quality === 0 ? 0.7 : 1));
     const lists: { x: number; y: number; z: number; s: number; ry: number; tilt?: number }[][] = def.trees.map(() => []);
     let placed = 0, tries = 0;
     while (placed < want && tries++ < want * 40) {
@@ -399,10 +411,10 @@ export class Zone {
           c += spec * 0.9 * light;
           float caust = smoothstep(0.62, 0.9, rip) * 0.16 * (1.0 - smoothstep(0.0, 2.0, vDepth));
           c += caust;
-          float foam = smoothstep(0.32, 0.0, vDepth + (rip - 0.5) * 0.18 + sin(uTime * 1.5 + vDepth * 30.0) * 0.03);
-          c = mix(c, vec3(1.0), foam * 0.8);
+          float foam = smoothstep(0.16, 0.0, vDepth + (rip - 0.5) * 0.12 + sin(uTime * 1.5 + vDepth * 30.0) * 0.02);
+          c = mix(c, vec3(0.92, 0.97, 1.0), foam * 0.5);
           c *= light;
-          float a = mix(0.55, 0.92, smoothstep(0.0, 1.6, vDepth)); a = max(a, fres * 0.9); a = mix(a, 0.95, foam) * smoothstep(-0.05, 0.06, vDepth);
+          float a = mix(0.55, 0.92, smoothstep(0.0, 1.6, vDepth)); a = max(a, fres * 0.9); a = mix(a, 0.8, foam) * smoothstep(-0.05, 0.08, vDepth);
           gl_FragColor = vec4(c, a);
           #include <colorspace_fragment>
           #include <fog_fragment>
@@ -416,8 +428,19 @@ export class Zone {
     return mesh;
   }
 
-  private prop(path: string, x: number, z: number, ry: number, scale: number, collide = 0, yOff = 0) {
+  private tintCache = new Map<string, THREE.Material>();
+  private prop(path: string, x: number, z: number, ry: number, scale: number, collide = 0, yOff = 0, tint?: number) {
     const o = model(path);
+    if (tint !== undefined) {
+      o.traverse((m) => {
+        const mesh = m as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const src = mesh.material as THREE.MeshLambertMaterial, key = src.uuid + tint;
+        let mat = this.tintCache.get(key) as THREE.MeshLambertMaterial | undefined;
+        if (!mat) { mat = src.clone(); mat.color.multiply(new THREE.Color(tint)); this.tintCache.set(key, mat); this.disposables.push(mat); }
+        mesh.material = mat;
+      });
+    }
     o.scale.setScalar(scale);
     o.position.set(x, this.terrain.height(x, z) + yOff, z);
     o.rotation.y = ry;
@@ -425,6 +448,32 @@ export class Zone {
     this.group.add(o);
     if (collide > 0) this.addCollider({ x, z, r: collide, h: 30, kind: collide > 2 ? 'building' : 'prop' });
     return o;
+  }
+  private marker(kind: StationKind, pos: THREE.Vector3, h: number) {
+    const ic: Record<string, [string, string]> = { merchant: ['coin', '#e0b040'], fletcher: ['bow', '#c8a070'], tanner: ['hide', '#b98a58'], inn: ['bed', '#c86a5a'], wagon: ['wagon', '#99643a'], board: ['scroll', '#e8dcc0'] };
+    const def = ic[kind];
+    if (!def) return;
+    const c = document.createElement('canvas');
+    c.width = c.height = 96;
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const img = new Image();
+    img.onload = () => {
+      const g = c.getContext('2d')!;
+      g.fillStyle = '#2a1c10'; g.beginPath(); g.arc(48, 44, 40, 0, 7); g.fill(); g.beginPath(); g.moveTo(34, 78); g.lineTo(48, 96); g.lineTo(62, 78); g.fill();
+      g.fillStyle = '#f5ead0'; g.beginPath(); g.arc(48, 44, 34, 0, 7); g.fill();
+      g.drawImage(img, 20, 16, 56, 56);
+      tex.needsUpdate = true;
+    };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon(def[0], def[1], 56));
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+    s.scale.setScalar(0.85);
+    s.position.set(pos.x, pos.y + h, pos.z);
+    s.userData.y = pos.y + h;
+    s.renderOrder = 6;
+    this.markers.push(s);
+    this.group.add(s);
+    this.disposables.push(tex, s.material);
   }
   private fire(pos: THREE.Vector3) {
     if (!fireTex) fireTex = fireTexture();
@@ -481,6 +530,7 @@ export class Zone {
       }
       const st: Station = { kind, pos, radius, prompt, name, npc };
       this.stations.push(st);
+      this.marker(kind, npc ? npc.pos : pos, npc ? 2.5 : 3.1);
       return st;
     };
     // Merchant stall
@@ -553,10 +603,10 @@ export class Zone {
     // town campfire
     {
       const [x, z] = at(150, 12);
-      this.prop('props/k_campfire-pit', x, z, 0, 5.5, 0.7);
+      this.prop('props/k_campfire-pit', x, z, 0, 5.5, 0.7, 0, 0x9a8a80);
       const pos = new THREE.Vector3(x, t.height(x, z), z);
       this.fire(pos);
-      const [lx, lz] = at(163, 13.5); this.prop('props/k_tree-log', lx, lz, 1.2, 4.2, 0.6);
+      const [lx, lz] = at(163, 13.5); this.prop('props/k_tree-log', lx, lz, 1.2, 3.6, 0.6, 0, 0x8a6a50);
       this.stations.push({ kind: 'campfire', pos, radius: 2.6, prompt: 'Cook at the fire', name: 'Campfire' });
     }
     // dressing
@@ -572,24 +622,51 @@ export class Zone {
       const [x, z] = at(d, 12);
       const l = new THREE.PointLight(0xffc070, 0, 26, 1.4);
       l.position.set(x, c.y + 3.2, z);
-      l.userData.lamp = true;
+      this.lamps.push(l);
       this.group.add(l);
       const post = this.prop('props/Torch_Metal', x, z, 0, 1.6, 0.2);
       post.userData.lamp = l;
     }
   }
 
+  /** A simple canvas ridge tent. */
+  private tent(x: number, z: number, ry: number) {
+    const w = 1.5, h = 1.9, l = 1.7;
+    const g = new THREE.BufferGeometry();
+    // two sloped sides + back triangle
+    g.setAttribute('position', new THREE.Float32BufferAttribute([
+      -w, 0, -l, 0, h, -l, 0, h, l, -w, 0, -l, 0, h, l, -w, 0, l,
+      w, 0, -l, 0, h, l, 0, h, -l, w, 0, -l, w, 0, l, 0, h, l,
+      -w, 0, -l, w, 0, -l, 0, h, -l,
+    ], 3));
+    g.computeVertexNormals();
+    const canvas = new THREE.MeshLambertMaterial({ color: this.def.snow ? 0xb8a890 : 0xd8c49a, side: THREE.DoubleSide });
+    const wood = new THREE.MeshLambertMaterial({ color: 0x6a4a2e });
+    const grp = new THREE.Group();
+    const cloth = new THREE.Mesh(g, canvas);
+    const poleG = new THREE.CylinderGeometry(0.05, 0.05, h + 0.25, 6);
+    const p1 = new THREE.Mesh(poleG, wood), p2 = new THREE.Mesh(poleG, wood);
+    p1.position.set(0, (h + 0.25) / 2, l); p2.position.set(0, (h + 0.25) / 2, -l);
+    grp.add(cloth, p1, p2);
+    grp.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+    grp.position.set(x, this.terrain.height(x, z) - 0.03, z);
+    grp.rotation.y = ry;
+    this.group.add(grp);
+    this.disposables.push(g, canvas, wood, poleG);
+    this.addCollider({ x, z, r: 1.5, h: 2, kind: 'prop' });
+  }
+
   private buildCamps() {
     const t = this.terrain;
     for (const c of t.camps) {
-      this.prop('props/k_campfire-pit', c.x, c.z, 0, 5.5, 0.7);
+      this.prop('props/k_campfire-pit', c.x, c.z, 0, 5.5, 0.7, 0, 0x9a8a80);
       this.fire(c.clone());
       this.stations.push({ kind: 'campfire', pos: c.clone(), radius: 2.6, prompt: 'Cook at the fire', name: 'Campfire' });
-      this.prop('props/k_tent', c.x + 3.6, c.z - 2.2, -1.0, 7, 2.1);
+      this.tent(c.x + 3.8, c.z - 2.4, -0.9);
       const bx = c.x - 2.6, bz = c.z - 2.4;
-      this.prop('props/k_bedroll', bx, bz, 0.7, 5.5, 0);
+      this.prop('props/k_bedroll', bx, bz, 0.7, 4.6, 0, 0, 0xb89a80);
       this.stations.push({ kind: 'bedroll', pos: new THREE.Vector3(bx, t.height(bx, bz), bz), radius: 2, prompt: 'Rest until morning', name: 'Bedroll' });
-      this.prop('props/k_tree-log', c.x + 0.4, c.z + 3, 0.2, 4.2, 0.6);
+      this.prop('props/k_tree-log', c.x + 0.4, c.z + 3, 0.2, 3.6, 0.6, 0, 0x8a6a50);
     }
   }
 
@@ -600,7 +677,7 @@ export class Zone {
     (wu.sky.value as THREE.Color).copy(sky);
     (wu.sunDir.value as THREE.Vector3).copy(sunDir);
     wu.light.value = 0.35 + 0.65 * (1 - night);
-    for (const g of this.grassChunks) g.visible = Math.hypot(g.userData.cx - cam.x, g.userData.cz - cam.z) < 105;
+    for (const g of this.grassChunks) g.visible = Math.hypot(g.userData.cx - cam.x, g.userData.cz - cam.z) < 104;
     for (const n of this.npcs) n.update(dt, player);
     for (const f of this.fires) {
       const d = f.pos.distanceTo(cam);
@@ -612,10 +689,13 @@ export class Zone {
       });
       f.light.intensity = d < 70 ? (14 + Math.sin(time * 11 + f.pos.z) * 3 + Math.sin(time * 27) * 1.5) * (0.35 + night * 0.65) : 0;
     }
-    this.group.traverse((o) => {
-      const l = o as THREE.PointLight;
-      if (l.isPointLight && l.userData.lamp) l.intensity = night * 26;
-    });
+    for (const l of this.lamps) l.intensity = night * 26;
+    for (let i = 0; i < this.markers.length; i++) {
+      const m = this.markers[i], d = Math.hypot(m.position.x - player.x, m.position.z - player.z);
+      m.visible = d < 46 && d > 3.4;
+      m.position.y = m.userData.y + Math.sin(time * 2 + i) * 0.12;
+      (m.material as THREE.SpriteMaterial).opacity = Math.min(1, (46 - d) / 10, (d - 3.4) / 2);
+    }
   }
 
   nearestFire(p: THREE.Vector3) {

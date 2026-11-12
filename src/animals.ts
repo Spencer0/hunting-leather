@@ -60,7 +60,7 @@ export class Animal {
   private bHead: THREE.Object3D | null; private bChest: THREE.Object3D | null; private bRear: THREE.Object3D | null;
   private boneFrame = -1; head = new THREE.Vector3(); chest = new THREE.Vector3(); rear = new THREE.Vector3();
   scale: number;
-  private pitch = 0;
+  private pitch = 0; private dustT = 0;
   engaged = false;
 
   constructor(public def: SpeciesDef, x: number, z: number, private zone: Zone) {
@@ -252,7 +252,7 @@ export class Animal {
       const see = (p.crouching ? 14 : 34) * this.def.senses * (1 - 0.35 * night) * (front ? 1 : 0.4) * (p.moving ? 1 : 0.75);
       const hear = 24 * p.noise * this.def.senses;
       const range = Math.max(see, hear, 2.6);
-      if (d < range) this.meter += dt * (0.3 + 1.5 * (1 - d / range)) * (1 - perk('lightstep') * 0.15);
+      if (d < range) this.meter += dt * (0.12 + 1.5 * (1 - d / range)) * (1 - perk('lightstep') * 0.15);
       else this.meter -= dt * 0.22;
     } else this.meter -= dt * 0.22;
     this.meter = clamp(this.meter, 0, 1.2);
@@ -358,6 +358,10 @@ export class Animal {
       this.pitch = damp(this.pitch, clamp(target, -0.5, 0.5), 8, dt);
     }
     this.place();
+    if (this.speed > 5 && d < 70) {
+      this.dustT -= dt;
+      if (this.dustT <= 0) { this.dustT = 0.16; G.fx.dust(this.pos); }
+    }
     if (d < 130) this.mixer.update(dt);
   }
 }

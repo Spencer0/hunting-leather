@@ -4,7 +4,7 @@ import { Animal, type HitInfo } from './animals';
 import { audio, type Mood } from './audio';
 import { G } from './ctx';
 import { GEAR, ITEMS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
-import { input } from './input';
+import { input, rumble } from './input';
 import type { Shot } from './projectiles';
 import { S, addItem, addXp, ammoCap, buyPrice, capacity, count, countItem, invKey, maxHp, perk, removeAny, removeItem, sellValue, settings, skinBonus, splitKey, totalWeight, writeSave, zoneIndex, type Contract } from './state';
 import { pick } from './util';
@@ -112,7 +112,7 @@ export class Game {
     G.fx.burst(info.point, 0xe8dcc8, 5, 1.5, 0.12, 0.6, 2);
     G.ui.hitMarker(killed ? 'kill' : crit ? 'crit' : 'hit');
     G.ui.damage(info.point, dmg, crit, info.part === 'head' ? 'Headshot' : info.part === 'vital' ? 'Vital' : unaware ? 'Ambush' : '');
-    if (killed) this.onKill(a, s.dist);
+    if (killed) { rumble(0.6, 180); this.onKill(a, s.dist); }
     else if (a.def.legendary) this.onLegendEngage(a);
   }
   private onKill(a: Animal, dist: number) {

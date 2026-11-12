@@ -143,6 +143,7 @@ export class Projectiles {
       const p = this.pickups[i];
       p.t -= dt;
       if (p.t <= 0) { p.obj.removeFromParent(); this.pickups.splice(i, 1); continue; }
+      if (!p.broken && Math.random() < dt * 1.2 && Math.hypot(p.pos.x - pp.x, p.pos.z - pp.z) < 45) G.fx.emit(p.pos.x, p.pos.y + 0.5, p.pos.z, 0, 0.5, 0, 0.9, 0.14, 0xfff0a0, 0.9, 0);
       if (!p.broken && Math.hypot(p.pos.x - pp.x, p.pos.z - pp.z) < 1.5 && Math.abs(p.pos.y - pp.y) < 2.6) {
         const capped = (p.ammo === 'arrow' || p.ammo === 'bolt') && count(p.ammo) >= ammoCap();
         if (capped) continue;

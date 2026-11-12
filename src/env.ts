@@ -52,6 +52,9 @@ export class Environment {
   private keys: Key[] = [];
   private cTop = new THREE.Color(); private cHor = new THREE.Color(); private cA = new THREE.Color(); private cB = new THREE.Color();
   private density = 0.006;
+  private birds: THREE.Mesh[] = [];
+  private birdC = new THREE.Vector3();
+  private birdOn = true;
 
   constructor(private scene: THREE.Scene, shadowSize: number) {
     this.domeMat = new THREE.ShaderMaterial({
@@ -111,6 +114,17 @@ export class Environment {
       this.group.add(m);
     }
 
+    // a distant flock circling overhead
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.5, 0, 0, -0.5, 1.6, 0.25, -0.1, 0, 0, 0.5, -1.6, 0.25, -0.1, 0, 0, -0.5], 3));
+    const bm = new THREE.MeshBasicMaterial({ color: 0x20242c, side: THREE.DoubleSide, fog: true });
+    for (let i = 0; i < 7; i++) {
+      const b = new THREE.Mesh(bg, bm);
+      b.userData = { a: r() * 6.28, rad: 14 + r() * 26, h: r() * 10, sp: 0.25 + r() * 0.2, ph: r() * 6 };
+      b.frustumCulled = false;
+      this.birds.push(b);
+      scene.add(b);
+    }
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(shadowSize, shadowSize);
     const sc = this.sun.shadow.camera;
@@ -123,6 +137,7 @@ export class Environment {
 
   setZone(z: ZoneDef) {
     this.density = z.fogDensity;
+    this.birdOn = !z.snow;
     const snow = z.snow;
     this.keys = [
       { h: 0, top: 0x060b1c, hor: 0x121c33, sun: 0x8fa8e8, sunI: 0.55, hemiS: 0x4a5f9a, hemiG: 0x1c2233, hemiI: 0.75 },
@@ -183,6 +198,15 @@ export class Environment {
     this.domeMat.uniforms.glow.value = (1 - this.night) * 1.6;
     (this.stars.material as THREE.PointsMaterial).opacity = smooth(0.5, 1, this.night) * 0.9;
     this.stars.rotation.y += dt * 0.003;
+    if (this.birdC.distanceTo(camPos) > 260) this.birdC.set(camPos.x + 60, 0, camPos.z - 40);
+    for (const b of this.birds) {
+      const u = b.userData;
+      b.visible = this.birdOn && this.night < 0.5;
+      u.a += dt * u.sp;
+      b.position.set(this.birdC.x + Math.cos(u.a) * u.rad, focus.y + 38 + u.h + Math.sin(u.a * 2 + u.ph) * 2, this.birdC.z + Math.sin(u.a) * u.rad);
+      b.rotation.y = -u.a;
+      b.scale.set(1, 1 + Math.sin(dt * 0 + u.a * 34 + u.ph) * 2.2, 1);
+    }
     for (const c of this.clouds) {
       c.position.x += dt * 2.2;
       if (c.position.x > 700) c.position.x = -700;
