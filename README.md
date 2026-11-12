@@ -6,6 +6,14 @@ day/night, generative music, save slots and gamepad support.
 
 **Play:** https://spencer0.github.io/hunting-leather/ (deployed from `main` by GitHub Actions)
 
+![Title screen](docs/title.jpg)
+
+| | |
+| --- | --- |
+| ![Greenhollow Vale](docs/greenhollow.jpg) | ![Amberwood](docs/amberwood.jpg) |
+| ![Sunscar Steppe](docs/sunscar.jpg) | ![Frostfang Peaks](docs/frostfang.jpg) |
+| ![A wilderness camp at dusk](docs/camp.jpg) | ![The tanning bench](docs/crafting.jpg) |
+
 ## The loop
 
 1. **Hunt** — stalk game with bows, crossbows and thrown weapons. Crouch to stay unseen; an unaware animal

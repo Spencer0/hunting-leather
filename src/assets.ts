@@ -20,7 +20,7 @@ function toLambert(m: THREE.Material): THREE.Material {
     name: s.name,
     color: s.color ? s.color.clone() : new THREE.Color(0xffffff),
     map: s.map ?? null,
-    vertexColors: s.vertexColors,
+    vertexColors: false, // source packs use vertex colour as a wind mask, not as albedo
     side: s.side,
     transparent: false,
   });

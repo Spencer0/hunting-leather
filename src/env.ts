@@ -183,7 +183,7 @@ export class Environment {
     if (this.sunDir.y < 0.12) { this.sunDir.y = 0.12; this.sunDir.normalize(); }
     // fade light near the horizon hand-over to avoid popping
     const hand = useMoon ? smooth(0.02, 0.2, moonPos.y) : smooth(0.06, 0.2, sunPos.y);
-    this.sun.intensity *= 0.25 + 0.75 * hand;
+    this.sun.intensity *= 0.06 + 0.94 * hand;
     this.sun.target.position.copy(focus);
     this.sun.position.copy(focus).addScaledVector(this.sunDir, 120);
 

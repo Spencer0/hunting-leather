@@ -419,7 +419,7 @@ export class Player {
     const cam = G.camera, t = G.zone.terrain;
     const aim = this.aiming;
     this.camDist = damp(this.camDist, aim ? 2.7 : this.crouching ? 4.0 : 5.2, 8, dt);
-    this.camSide = damp(this.camSide, aim ? 0.95 : 0.35, 8, dt);
+    this.camSide = damp(this.camSide, aim ? 1.05 : 0.35, 8, dt);
     const zoom = aim ? (w?.kind === 'crossbow' ? 36 : w?.kind === 'bow' ? 44 - this.draw * 6 : 50) : 58;
     this.fov = damp(this.fov, zoom, 9, dt);
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
@@ -428,16 +428,16 @@ export class Player {
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const fwd = _f.set(-Math.sin(yaw) * cp, -sp, -Math.cos(yaw) * cp);
     const target = _v2.copy(this.pos);
-    target.y += (this.crouching ? 1.15 : 1.62) + (aim ? 0.12 : 0) + (this.dead ? -0.6 : 0);
+    target.y += (aim ? (this.crouching ? 1.5 : 1.78) : this.crouching ? 1.15 : 1.62) + (this.dead ? -0.6 : 0);
     target.x += Math.cos(yaw) * this.camSide; target.z += -Math.sin(yaw) * this.camSide;
     // pull the camera in if terrain blocks it
     let dist = this.camDist;
     for (let d = 0.8; d <= this.camDist; d += 0.4) {
       const px = target.x - fwd.x * d, pz = target.z - fwd.z * d, py = target.y - fwd.y * d;
-      if (py < t.height(px, pz) + 0.3) { dist = Math.max(0.6, d - 0.4); break; }
+      if (py < Math.max(t.height(px, pz), WATER_Y) + 0.3) { dist = Math.max(0.6, d - 0.4); break; }
     }
     const want = _n.copy(target).addScaledVector(fwd, -dist);
-    const gy = t.height(want.x, want.z) + 0.3;
+    const gy = Math.max(t.height(want.x, want.z), WATER_Y) + 0.3;
     if (want.y < gy) want.y = gy;
     if (this.camPos.lengthSq() === 0) this.camPos.copy(want);
     this.camPos.lerp(want, 1 - Math.exp(-28 * dt));

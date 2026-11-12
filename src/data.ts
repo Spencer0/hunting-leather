@@ -139,7 +139,7 @@ export const ZONES: Record<string, ZoneDef> = {
     spawns: [['doe', 5], ['fox', 5], ['stag', 1]], legendary: 'emberclaw',
     trees: [['CommonTree_1', 3], ['CommonTree_2', 3], ['CommonTree_3', 2], ['CommonTree_5', 2], ['Pine_1', 1]], treeDensity: 1, leafTint: 0xffffff, barkTint: 0xffffff,
     grassColor: 0x4f8f2f, grassTip: 0xb7d94c, ground: ['grass', 'dirt', 'rock'], groundTint: 0xffffff,
-    bushes: [['Bush_Common_Flowers', 3], ['Bush_Common', 3], ['Fern_1', 3], ['Flower_3_Group', 3], ['Flower_4_Group', 3], ['Plant_1_Big', 2], ['Mushroom_Common', 1]], bushTint: 0xffffff, rocks: 50,
+    bushes: [['Bush_Common_Flowers', 1], ['Bush_Common', 4], ['Fern_1', 3], ['Flower_3_Group', 3], ['Flower_4_Group', 3], ['Plant_1_Big', 2], ['Mushroom_Common', 1]], bushTint: 0xffffff, rocks: 50,
     fogDay: 0xbfe3f2, fogDensity: 0.0052, skyTop: 0x3f8fe0, hillAmp: 9, water: -2.2, waterColor: 0x3f9fb8, snow: false, grassAmount: 1, step: 'grass',
     music: 60, scale: [0, 2, 4, 7, 9], priceBias: { fur: 0.9, leather: 1, goods: 1, trophy: 1, meat: 1.1 },
   },
