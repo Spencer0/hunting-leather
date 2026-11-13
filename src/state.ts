@@ -1,5 +1,5 @@
 // Persistent player state, inventory helpers and save slots.
-import { GEAR, ITEMS, MAX_LEVEL, PERKS, QUALITY_MULT, WEAPONS, ZONES, ZONE_ORDER, xpForLevel, type GearSlot, type Quality } from './data';
+import { GEAR, GOODS_MULT, ITEMS, MAX_LEVEL, PERKS, QUALITY_MULT, WEAPONS, ZONES, ZONE_ORDER, xpForLevel, type GearSlot, type Quality } from './data';
 
 export interface Contract {
   id: number; zone: string; kind: 'hide' | 'goods' | 'hunt';
@@ -63,6 +63,8 @@ export function readSlot(i: number): Save | null {
     if (!raw) return null;
     const s = JSON.parse(raw) as Save;
     if (s.v !== 1) return null;
+    // older saves stored crafted goods without a grade
+    for (const k of Object.keys(s.inv)) if (!k.includes(':') && ITEMS[k]?.cat === 'goods') { s.inv[k + ':1'] = (s.inv[k + ':1'] ?? 0) + s.inv[k]; delete s.inv[k]; }
     return s;
   } catch { return null; }
 }
@@ -92,11 +94,12 @@ export function splitKey(key: string): [string, Quality] {
   const i = key.indexOf(':');
   return i < 0 ? [key, 1] : [key.slice(0, i), Number(key.slice(i + 1)) as Quality];
 }
-export const invKey = (id: string, q?: Quality) => (ITEMS[id]?.cat === 'hide' ? `${id}:${q ?? 1}` : id);
+export const graded = (id: string) => { const c = ITEMS[id]?.cat; return c === 'hide' || c === 'goods'; };
+export const invKey = (id: string, q?: Quality) => (graded(id) ? `${id}:${q ?? 1}` : id);
 export const count = (key: string) => S.inv[key] ?? 0;
 /** Count across qualities for hides at or above min quality. */
 export function countItem(id: string, minQ: Quality = 0): number {
-  if (ITEMS[id]?.cat !== 'hide') return count(id);
+  if (!graded(id)) return count(id);
   let n = 0;
   for (let q = minQ; q <= 2; q++) n += count(`${id}:${q}`);
   return n;
@@ -123,7 +126,7 @@ export function removeItem(key: string, n = 1): boolean {
 }
 /** Remove n of a hide starting with the lowest quality >= minQ. Non-hides behave like removeItem. */
 export function removeAny(id: string, n: number, minQ: Quality = 0): boolean {
-  if (ITEMS[id]?.cat !== 'hide') return removeItem(id, n);
+  if (!graded(id)) return removeItem(id, n);
   if (countItem(id, minQ) < n) return false;
   for (let q = minQ; q <= 2 && n > 0; q++) {
     const k = `${id}:${q}`;
@@ -139,6 +142,7 @@ export function sellValue(key: string, zoneId: string): number {
   const bias = ZONES[zoneId].priceBias[it.cat] ?? (it.cat === 'hide' ? 0.6 : 1);
   let v = it.value * bias;
   if (it.cat === 'hide') v *= QUALITY_MULT[q] * (id.match(/emberclaw|monarch|ironhorn|oldrime/) ? 1 / 0.6 : 1);
+  if (it.cat === 'goods') v *= GOODS_MULT[q];
   if (it.cat === 'ammo' || it.cat === 'supply') v = it.value;
   return Math.max(1, Math.round(v * sellMult()));
 }

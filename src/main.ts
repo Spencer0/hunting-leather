@@ -24,7 +24,9 @@ renderer.toneMappingExposure = 1.02;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.15, 1700);
 G.renderer = renderer; G.scene = scene; G.camera = camera;
+const fitUi = () => { ui.root.style.zoom = String(Math.min(3, Math.max(0.7, Math.min(innerWidth / 1280, innerHeight / 720)))); };
 window.addEventListener('resize', () => {
+  fitUi();
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -32,6 +34,7 @@ window.addEventListener('resize', () => {
 initInput(canvas);
 const ui = new UI();
 G.ui = ui;
+fitUi();
 const dev = new URLSearchParams(location.search);
 
 async function boot() {
@@ -119,12 +122,13 @@ function frame() {
     const menu = ui.isOpen || ui.blocking;
     if (menu) {
       ui.nav();
-      if (ui.isOpen && (input.uiBack() || (input.menuHit() && !input.keyHit('KeyI')) || input.keyHit('KeyP'))) ui.close();
+      ui.tick(dt);
+      if (ui.isOpen && !ui.miniActive && (input.uiBack() || (input.menuHit() && !input.keyHit('KeyI')) || input.keyHit('KeyP'))) ui.close();
       p.update(dt); // frozen: keeps camera + animation alive
     } else {
       if (input.pauseHit()) ui.open('pause');
       else if (input.menuHit()) { audio.play('ui_open'); ui.open('journal'); }
-      else if (input.mapHit()) { audio.play('ui_open'); ui.open('journal'); (ui as any).tab = 'Map'; ui.refresh(); }
+      else if (input.mapHit()) { audio.play('ui_open'); ui.open('journal', 'Map'); }
       if (!(window as any).__pause) {
         p.update(dt);
         G.animals.update(dt);

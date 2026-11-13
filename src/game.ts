@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { Animal, type HitInfo } from './animals';
 import { audio, type Mood } from './audio';
 import { G } from './ctx';
-import { GEAR, ITEMS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
+import { GEAR, GOODS_QUALITY, ITEMS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
 import { input, rumble } from './input';
 import type { Shot } from './projectiles';
 import { S, addItem, addXp, ammoCap, buyPrice, capacity, count, countItem, invKey, maxHp, perk, removeAny, removeItem, sellValue, settings, skinBonus, splitKey, totalWeight, writeSave, zoneIndex, type Contract } from './state';
@@ -42,6 +42,8 @@ export class Game {
     S.zone = id;
     const t = G.zone.terrain;
     G.player.teleport(t.town.x + 1.5, t.town.z + 24, Math.PI);
+    G.player.cine = null;
+    G.player.refreshBack();
     G.animals.populate(G.zone);
     this.legend = null;
     G.ui.boss(null);
@@ -204,7 +206,7 @@ export class Game {
   // ---------- trade ----------
   shopStock(kind: 'merchant' | 'fletcher'): string[] {
     const zi = zoneIndex(S.zone);
-    const ids = kind === 'merchant' ? ['salt', 'thread', 'rivets', 'tonic'] : ['arrow', 'bolt', 'knife', 'tomahawk', 'javelin'];
+    const ids = kind === 'merchant' ? ['salt', 'bark', 'thread', 'rivets', 'tonic'] : ['arrow', 'bolt', 'knife', 'tomahawk', 'javelin'];
     return ids.filter((id) => (ITEMS[id].minZone ?? 0) <= zi);
   }
   weaponStock(): string[] {
@@ -256,25 +258,28 @@ export class Game {
   }
 
   // ---------- crafting ----------
-  tan(key: string, n: number) {
+  /** Tan n hides. score 0..1 comes from the scraping minigame (quick tanning passes 0.6). */
+  tan(key: string, n: number, score = 0.6, agent: 'salt' | 'bark' = 'salt'): number {
     const [id, q] = splitKey(key);
     const rule = TANNING[id];
-    if (!rule) return;
-    n = Math.min(n, count(key), count('salt'));
-    if (n <= 0) { G.ui.toast('You need Tanning Salts', 'warn'); audio.play('error'); return; }
+    if (!rule) return 0;
+    n = Math.min(n, count(key), count(agent));
+    if (n <= 0) { G.ui.toast(`You need ${ITEMS[agent].name}`, 'warn'); audio.play('error'); return 0; }
     let out = 0;
     for (let i = 0; i < n; i++) {
-      out += Math.max(1, rule[1] + (q === 2 ? 1 : q === 0 ? -1 : 0));
-      if (Math.random() < perk('tanner') * 0.15) out++;
+      let y = rule[1] + (q === 2 ? 1 : q === 0 ? -1 : 0) + (agent === 'bark' ? 1 : 0);
+      if (score >= 0.85) y++; else if (score < 0.35) y--;
+      if (Math.random() < perk('tanner') * 0.15) y++;
+      out += Math.max(1, y);
     }
     addItem(key, -n);
-    addItem('salt', -n);
+    addItem(agent, -n);
     addItem(rule[0], out);
     S.flags.tan = true;
     audio.play('tan');
-    G.ui.toast(`+${out} ${ITEMS[rule[0]].name}`, 'item', rule[0]);
-    this.gainXp(4 * n);
-    if (!S.flags.hint_craft) { S.flags.hint_craft = true; G.ui.hint('Switch to <b>Craft</b> to turn leather into goods and gear.', 9); }
+    G.ui.toast(`${score >= 0.85 ? 'Perfect tan! ' : ''}+${out} ${ITEMS[rule[0]].name}`, score >= 0.85 ? 'rare' : 'item', rule[0]);
+    this.gainXp(4 * n + (score >= 0.85 ? 4 : 0));
+    return out;
   }
   canCraft(r: RecipeDef): boolean {
     if (S.level < r.rank) return false;
@@ -286,17 +291,52 @@ export class Game {
     const g = GEAR[id];
     return GEAR[S.gear[g.slot]].tier >= g.tier;
   }
-  craft(r: RecipeDef) {
+  /** score 0..1 from the stitching minigame decides Rough / plain / Fine for trade goods. */
+  craft(r: RecipeDef, score = 0.6) {
     if (!this.canCraft(r)) { audio.play('error'); return; }
     for (const [id, n] of r.needs) removeAny(id, n);
-    if (r.out.item) { addItem(r.out.item, r.out.qty ?? 1); G.ui.toast(`Crafted ${ITEMS[r.out.item].name}`, 'good', r.out.item); }
+    const fine = score >= 0.85, rough = score < 0.35;
+    if (r.out.item) {
+      const q: Quality = fine ? 2 : rough ? 0 : 1;
+      addItem(invKey(r.out.item, q), 1);
+      G.ui.toast(`Crafted ${q === 1 ? '' : GOODS_QUALITY[q] + ' '}${ITEMS[r.out.item].name}`, fine ? 'rare' : 'good', r.out.item);
+    }
     if (r.out.gear) { const g = GEAR[r.out.gear]; S.gear[g.slot] = g.id; G.ui.toast(`Equipped ${g.name}`, 'rare'); audio.play('equip'); }
     if (r.out.weapon) { S.weapons.push(r.out.weapon); this.equipWeapon(r.out.weapon); G.ui.toast(`Forged ${WEAPONS[r.out.weapon].name}`, 'rare'); }
     S.stats.crafted++;
     S.flags.craft = true;
     audio.play('craft');
-    this.gainXp(r.xp);
-    if (!S.flags.hint_sell && r.out.item) { S.flags.hint_sell = true; G.ui.hint('Sell crafted goods to the <b>merchant</b>. Prices differ from town to town.', 9); }
+    this.gainXp(Math.round(r.xp * (fine ? 1.3 : 1)));
+    G.player.refreshBack();
+  }
+  /** Bench cutscene: stand the hunter at the tanner's bench and let the camera circle. */
+  benchScene(on: boolean, anim: 'Working_A' | 'Hammering' = 'Working_A') {
+    const p = G.player;
+    if (!on) { p.cine = null; return; }
+    const st = G.zone.stations.find((x) => x.kind === 'tanner');
+    if (!st) return;
+    const t = G.zone.terrain.town;
+    const out = Math.atan2(st.pos.x - t.x, st.pos.z - t.z);
+    p.pos.set(st.pos.x + Math.sin(out) * 0.7, st.pos.y, st.pos.z + Math.cos(out) * 0.7);
+    p.yaw = out;
+    p.crouching = false;
+    p.cine = { angle: out + Math.PI * 0.72, anim };
+  }
+  /** Knife slash landed on an animal. */
+  onMeleeHit(a: Animal, dmg: number) {
+    const unaware = a.unaware;
+    if (unaware) dmg *= 3;
+    dmg = Math.round(dmg);
+    a.bones();
+    const killed = a.onHit(dmg, unaware ? 'vital' : 'body', unaware, 'knife', 0.6);
+    audio.play('hit_flesh', { pos: a.pos });
+    G.fx.burst(a.chest, 0xb04a3a, 8, 2.4, 0.1, 0.45);
+    G.ui.hitMarker(killed ? 'kill' : unaware ? 'crit' : 'hit');
+    G.ui.damage(a.chest, dmg, unaware, unaware ? 'Ambush' : '');
+    rumble(0.5, 120);
+    G.shake = Math.min(1, G.shake + 0.3);
+    if (killed) this.onKill(a, 0);
+    else if (a.def.legendary) this.onLegendEngage(a);
   }
   cook(n: number) {
     n = Math.min(n, count('meat'));
@@ -420,7 +460,7 @@ export class Game {
     if (this.hintT <= 0) {
       this.hintT = 1;
       if (!S.flags.hint_sneak) {
-        for (const a of G.animals.list) if (a.alive && a.pos.distanceTo(p.pos) < 55) { S.flags.hint_sneak = true; G.ui.hint('Game nearby. Press <b>C</b> to crouch and stalk closer. Hold <b>Left Mouse</b> to draw, release to loose.', 11); break; }
+        for (const a of G.animals.list) if (a.alive && a.pos.distanceTo(p.pos) < 55) { S.flags.hint_sneak = true; G.ui.hint('Game nearby. Press <b>C</b> to crouch and stalk closer. Hold <b>Left Mouse</b> to draw, release to loose. <b>F</b> slashes with your knife.', 12); break; }
       }
       if (!S.flags.hint_move && S.stats.playtime > 2) { S.flags.hint_move = true; G.ui.hint('<b>WASD</b> to move, <b>Shift</b> to sprint, mouse to look. The hunting grounds lie north, past the well.', 10); }
     }

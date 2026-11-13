@@ -14,7 +14,7 @@ export interface Shot {
 }
 interface Pickup { obj: THREE.Object3D; ammo: string; pos: THREE.Vector3; t: number; broken: boolean }
 
-const GRAV = 7.5;
+export const GRAV = 7.5;
 const FWD_Z = new THREE.Vector3(0, 0, 1), FWD_Y = new THREE.Vector3(0, 1, 0);
 const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _dir = new THREE.Vector3(), _q2 = new THREE.Quaternion(), _x = new THREE.Vector3(1, 0, 0);
 const AMMO_MODEL: Record<string, string> = { arrow: 'arrow_bow', bolt: 'arrow_crossbow', knife: 'dagger', tomahawk: 'axe_1handed', javelin: 'spear_A' };
@@ -39,6 +39,8 @@ export class Projectiles {
     }
   }
 
+  /** Launch speed for a weapon at a given draw power. */
+  static speed(w: WeaponDef, power: number) { return w.speed * (w.kind === 'bow' ? 0.55 + 0.45 * power : 1); }
   fire(origin: THREE.Vector3, dir: THREE.Vector3, w: WeaponDef, power: number) {
     if (count(w.ammo) <= 0) return;
     addItem(w.ammo, -1);
@@ -56,7 +58,7 @@ export class Projectiles {
     holder.position.copy(origin);
     this.group.add(holder);
     // was any animal near the line of fire unaware? (decided on impact per animal, but remember the moment of release)
-    this.shots.push({ obj: holder, pos: origin.clone(), vel: dir.clone().multiplyScalar(w.speed * (w.kind === 'bow' ? 0.55 + 0.45 * power : 1)), weapon: w, power, age: 0, spin: 0, unaware: true, dist: 0 });
+    this.shots.push({ obj: holder, pos: origin.clone(), vel: dir.clone().multiplyScalar(Projectiles.speed(w, power)), weapon: w, power, age: 0, spin: 0, unaware: true, dist: 0 });
   }
 
   private stick(s: Shot, point: THREE.Vector3, kind: 'ground' | 'wood' | 'water') {

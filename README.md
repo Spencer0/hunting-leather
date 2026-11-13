@@ -12,15 +12,17 @@ day/night, generative music, save slots and gamepad support.
 | --- | --- |
 | ![Greenhollow Vale](docs/greenhollow.jpg) | ![Amberwood](docs/amberwood.jpg) |
 | ![Sunscar Steppe](docs/sunscar.jpg) | ![Frostfang Peaks](docs/frostfang.jpg) |
-| ![A wilderness camp at dusk](docs/camp.jpg) | ![The tanning bench](docs/crafting.jpg) |
+| ![A wilderness camp at dusk](docs/camp.jpg) | ![Scraping a hide](docs/tanning.jpg) |
+| ![The crafting bench](docs/crafting.jpg) | |
 
 ## The loop
 
 1. **Hunt** — stalk game with bows, crossbows and thrown weapons. Crouch to stay unseen; an unaware animal
    takes far more damage. Head and heart shots count.
 2. **Skin** — a clean kill (one arrow, a vital hit, a good knife) gives a *Pristine* hide; a pincushion gives a *Poor* one.
-3. **Tan & craft** — turn hides into leather and fur at the tanner's bench, then into trade goods or gear
-   (packs, quivers, armour, boots, bracers, knives — and two legendary weapons).
+3. **Tan & craft** — scrape hides in a timing minigame at the tanner's bench (good timing means extra leather),
+   then lay materials out on a 3×3 pattern grid and stitch them into trade goods or gear. Clean stitching makes
+   *Fine* goods that sell for more.
 4. **Sell** — every town values things differently. Furs are worth a fortune on the steppe.
 5. **Rank up** — earn Hunter Rank, spend skill points on nine perks, and unlock the wagon road to the next region.
 6. **End the legends** — each region hides a legendary beast. The last one has never been taken.
@@ -42,9 +44,10 @@ day/night, generative music, save slots and gamepad support.
 | Draw & loose / fire / throw | Left mouse (hold to draw a bow) | RT |
 | Bow · crossbow · thrown | 1 · 2 · 3 or wheel | LB / RB |
 | Span crossbow | R | — |
+| Knife slash (staggers) | F or middle mouse | Y |
 | Interact / skin | E | X |
 | Drink tonic | H | D-pad up |
-| Journal (pack, gear, skills, contracts, bestiary, map) | Tab | Back |
+| Journal (pack, skills, map) | Tab | Back |
 | Pause | Esc | Start |
 
 ## Tech

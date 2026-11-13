@@ -4,13 +4,15 @@ import { clips, model } from './assets';
 import { audio } from './audio';
 import { G } from './ctx';
 import { WEAPONS, type WeaponDef } from './data';
+import { GRAV, Projectiles } from './projectiles';
 import { input, rumble } from './input';
 import { S, activeWeapon, capacity, count, defense, drawMult, gear, maxHp, maxStamina, perk, settings, stealthMult, totalWeight } from './state';
 import { WATER_Y, edgeDist } from './terrain';
-import { clamp, damp, dampAngle, lerp } from './util';
+import { angleDiff, clamp, damp, dampAngle, lerp } from './util';
 import { CHAR_SCALE } from './world';
 
 const LOWER = /^(root|hips|upperleg|lowerleg|foot|toes)/;
+const BACK_Z = -0.3; // distance from the chest joint to the surface of the back, in model units
 type Chan = { cur: THREE.AnimationAction | null; name: string };
 
 const _f = new THREE.Vector3(), _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _n = new THREE.Vector3();
@@ -50,6 +52,12 @@ export class Player {
   private stepT = 0; private holdT = 0; private shotLock = 0; private upperHold = 0;
   private camPos = new THREE.Vector3();
   private landT = 0;
+  cine: { angle: number; anim: string } | null = null;
+  meleeT = -1; private meleeDone = false; private meleeAlt = false;
+  private dagger: THREE.Object3D;
+  private back = new THREE.Group();
+  private backKey = '';
+  private cineOn = false;
 
   constructor() {
     this.obj = model('chars/Ranger');
@@ -59,7 +67,7 @@ export class Player {
     this.handR = this.obj.getObjectByName('handslotr') ?? this.obj;
     this.chest = this.obj.getObjectByName('chest') ?? this.obj;
     this.head = this.obj.getObjectByName('head') ?? this.obj;
-    for (const file of ['General', 'MovementBasic', 'MovementAdvanced', 'CombatRanged', 'Tools']) {
+    for (const file of ['General', 'MovementBasic', 'MovementAdvanced', 'CombatRanged', 'CombatMelee', 'Tools']) {
       for (const c of clips('anims/' + file)) {
         if (this.acts.has(c.name + '_U')) continue;
         const up = new THREE.AnimationClip(c.name + '_U', c.duration, c.tracks.filter((t) => !LOWER.test(t.name)));
@@ -70,6 +78,61 @@ export class Player {
     }
     this.play(this.upper, 'Idle_A_U', 0);
     this.play(this.lower, 'Idle_A_L', 0);
+    this.dagger = model('weapons/dagger');
+    this.dagger.scale.setScalar(0.85);
+    this.dagger.visible = false;
+    this.handR.add(this.dagger);
+    // a holder on the chest whose axes match the character (x right, y up, z forward)
+    this.mixer.update(0);
+    this.obj.updateMatrixWorld(true);
+    this.chest.add(this.back);
+    this.back.quaternion.copy(this.chest.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(this.obj.getWorldQuaternion(new THREE.Quaternion())));
+  }
+
+  /** Rebuild what the hunter carries on their back: pack (by tier) and any slung weapons. */
+  refreshBack() {
+    const tier = gear('pack').tier;
+    const key = `${tier}|${S.slots.join(',')}|${S.active}`;
+    if (key === this.backKey) return;
+    this.backKey = key;
+    this.back.clear();
+    const mat = (c: number) => new THREE.MeshLambertMaterial({ color: c });
+    const add = (g: THREE.BufferGeometry, c: number, x: number, y: number, z: number, rz = 0, rx = 0) => {
+      const m = new THREE.Mesh(g, mat(c)); m.position.set(x, y, z); m.rotation.set(rx, 0, rz); m.castShadow = true; m.frustumCulled = false; this.back.add(m); return m;
+    };
+    const Z = BACK_Z;
+    if (tier >= 1) {
+      const col = [0, 0xc49a62, 0x8a5a34, 0x5a3a26][tier], w = 0.5 + tier * 0.06, h = 0.46 + tier * 0.08, d = 0.2 + tier * 0.04;
+      add(new THREE.BoxGeometry(w, h, d), col, 0, -0.08, Z - d / 2);
+      add(new THREE.BoxGeometry(w + 0.04, h * 0.42, 0.05), new THREE.Color(col).multiplyScalar(0.8).getHex(), 0, 0.06, Z - d - 0.02); // flap
+      add(new THREE.BoxGeometry(0.1, 0.07, 0.03), 0xe0b040, 0, -0.05, Z - d - 0.05); // buckle
+      add(new THREE.BoxGeometry(0.16, h * 0.6, 0.12), new THREE.Color(col).multiplyScalar(0.9).getHex(), w / 2 + 0.06, -0.14, Z - d / 2); // side pouch
+      if (tier >= 2) add(new THREE.CylinderGeometry(0.12, 0.12, w + 0.22, 10), 0x6f8250, 0, h / 2 + 0.05, Z - d / 2, Math.PI / 2); // bedroll
+      if (tier >= 3) {
+        add(new THREE.CylinderGeometry(0.025, 0.025, h + 0.7, 6), 0x6a4a2e, -w / 2 - 0.02, 0.1, Z - 0.03);
+        add(new THREE.CylinderGeometry(0.025, 0.025, h + 0.7, 6), 0x6a4a2e, w / 2 + 0.02, 0.1, Z - 0.03);
+        add(new THREE.CylinderGeometry(0.13, 0.13, w + 0.1, 10), 0xe8eef2, 0, h / 2 + 0.3, Z - d / 2, Math.PI / 2); // fur roll
+      }
+    }
+    const off = tier >= 1 ? 0.3 + tier * 0.04 : 0.06;
+    if (S.slots[0] && S.active !== 0) {
+      const w = WEAPONS[S.slots[0]], o = model('weapons/' + w.model);
+      if (w.model !== 'bow_withString') o.rotation.y = Math.PI / 2;
+      const g = new THREE.Group(); g.add(o);
+      g.rotation.set(Math.PI / 2, 0, 0.5, 'ZXY');
+      g.position.set(0.05, 0.05, Z - off);
+      this.back.add(g);
+    }
+    if (S.slots[1] && S.active !== 1) {
+      const w = WEAPONS[S.slots[1]], o = model('weapons/' + w.model);
+      o.scale.setScalar(w.modelScale ?? 1);
+      const g = new THREE.Group(); g.add(o);
+      g.rotation.set(-Math.PI / 2, 0, -0.5, 'ZXY');
+      g.scale.setScalar(0.72);
+      g.position.set(0.12, -0.42, Z - off - 0.05);
+      this.back.add(g);
+    }
+    this.back.traverse((o) => { o.frustumCulled = false; });
   }
 
   private play(ch: Chan, name: string, fade = 0.18, once = false, speed = 1) {
@@ -100,6 +163,7 @@ export class Player {
     const id = w ? w.id : '';
     if (id === this.weaponId) return;
     this.weaponId = id;
+    this.refreshBack();
     this.weaponObj?.removeFromParent();
     this.nocked?.removeFromParent();
     this.weaponObj = null; this.nocked = null;
@@ -165,21 +229,33 @@ export class Player {
   }
 
   /** World-space origin + direction for a shot fired now. */
-  private aimRay(origin: THREE.Vector3, dir: THREE.Vector3) {
-    const cam = G.camera;
+  /**
+   * Origin + launch direction for a shot fired now. The shot is solved to land exactly where the
+   * crosshair points: we find what the camera ray hits (animal, tree, ground) and compensate for
+   * both the shoulder offset and arrow drop.
+   */
+  private aimRay(origin: THREE.Vector3, dir: THREE.Vector3, speed: number) {
+    const cam = G.camera, t = G.zone.terrain;
     cam.getWorldDirection(dir);
-    const target = _v2.copy(cam.position).addScaledVector(dir, 70);
-    // closer aim point if the camera ray meets terrain sooner
-    const t = G.zone.terrain;
-    for (let d = 4; d < 70; d += 3) {
-      _v.copy(cam.position).addScaledVector(dir, d);
-      if (_v.y < t.height(_v.x, _v.z)) { target.copy(_v); break; }
+    const start = this.camDist + 1.4;
+    let hitD = 150;
+    const a = _v.copy(cam.position).addScaledVector(dir, start), b = _v2.copy(cam.position).addScaledVector(dir, 150);
+    const h = G.animals.hitTest(a, b);
+    if (h) hitD = h.point.distanceTo(cam.position);
+    const prev = _n.copy(a), cur = new THREE.Vector3();
+    for (let d = start + 1.5; d < hitD; d += 1.5) {
+      cur.copy(cam.position).addScaledVector(dir, d);
+      if (cur.y < t.height(cur.x, cur.z) || G.zone.segmentHit(prev, cur)) { hitD = d; break; }
+      prev.copy(cur);
     }
-    const right = _v.set(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
-    origin.copy(this.pos).addScaledVector(right, -0.28);
-    origin.y += this.crouching ? 1.0 : 1.38;
-    origin.addScaledVector(dir, 0.55);
-    dir.copy(target).sub(origin).normalize();
+    const target = cur.copy(cam.position).addScaledVector(dir, hitD);
+    origin.set(this.pos.x + Math.cos(this.camYaw) * 0.3, this.pos.y + (this.crouching ? 1.05 : 1.42), this.pos.z - Math.sin(this.camYaw) * 0.3);
+    origin.addScaledVector(dir, 0.6);
+    const dx = target.x - origin.x, dz = target.z - origin.z, dy = target.y - origin.y, x = Math.hypot(dx, dz);
+    if (x < 0.6) { dir.copy(target).sub(origin).normalize(); return; }
+    const v2 = speed * speed, disc = v2 * v2 - GRAV * (GRAV * x * x + 2 * dy * v2);
+    const ang = disc < 0 ? Math.PI / 4 : Math.atan2(v2 - Math.sqrt(disc), GRAV * x);
+    dir.set((dx / x) * Math.cos(ang), Math.sin(ang), (dz / x) * Math.cos(ang));
   }
 
   update(dt: number) {
@@ -214,7 +290,7 @@ export class Player {
     const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
     this.moving = ml > 0.1;
-    const wantAim = control && !this.busy && !!w && (input.aim() || this.drawing || this.throwT >= 0);
+    const wantAim = control && !this.busy && !!w && this.meleeT < 0 && (input.aim() || this.drawing || this.throwT >= 0);
     this.aiming = wantAim;
     const over = totalWeight() > capacity();
     const depth = WATER_Y - t.height(this.pos.x, this.pos.z);
@@ -259,7 +335,7 @@ export class Player {
     // facing
     const hs = Math.hypot(this.vel.x, this.vel.z);
     if (wantAim) this.yaw = dampAngle(this.yaw, this.camYaw + Math.PI, 18, dt);
-    else if (hs > 0.4 && this.moving) this.yaw = dampAngle(this.yaw, Math.atan2(this.vel.x, this.vel.z), 12, dt);
+    else if (hs > 0.4 && this.moving && this.meleeT < 0) this.yaw = dampAngle(this.yaw, Math.atan2(this.vel.x, this.vel.z), 12, dt);
 
     // noise / stealth
     const base = !this.moving || hs < 0.3 ? (this.crouching ? 0.05 : 0.22) : this.crouching ? 0.3 : sprinting ? 1.7 : wantAim ? 0.55 : 1;
@@ -276,8 +352,23 @@ export class Player {
       }
     }
 
+    // ----- knife slash -----
+    if (control && !this.busy && this.meleeT < 0 && input.meleeHit() && this.stamina > 12) this.startMelee();
+    if (this.meleeT >= 0) {
+      this.meleeT += dt;
+      if (!this.meleeDone && this.meleeT > 0.15) {
+        this.meleeDone = true;
+        const dmg = 16 + gear('knife').tier * 12 + S.level * 1.5;
+        for (const a of G.animals.list) {
+          if (!a.alive) continue;
+          const d = a.pos.distanceTo(this.pos) - a.radius;
+          if (d < 2.2 && Math.abs(angleDiff(this.yaw, Math.atan2(a.pos.x - this.pos.x, a.pos.z - this.pos.z))) < 1.15) G.game.onMeleeHit(a, dmg);
+        }
+      }
+      if (this.meleeT > 0.46) { this.meleeT = -1; this.dagger.visible = false; if (this.weaponObj?.parent === this.handR) this.weaponObj.visible = true; }
+    }
     // ----- weapons -----
-    if (control && !this.busy && w) this.updateWeapon(dt, w);
+    if (control && !this.busy && w && this.meleeT < 0) this.updateWeapon(dt, w);
     else { this.drawing = false; this.draw = 0; }
     if (this.reload > 0 && w?.kind === 'crossbow') {
       this.reload -= dt;
@@ -316,6 +407,26 @@ export class Player {
     this.updateCamera(dt, w);
   }
 
+  private startMelee() {
+    this.meleeT = 0; this.meleeDone = false; this.meleeAlt = !this.meleeAlt;
+    this.drawing = false; this.draw = 0; this.throwT = -1;
+    this.stamina -= 12;
+    // snap toward the nearest animal in reach, otherwise slash where the camera looks
+    let best: number | null = null, bd = 4.2;
+    for (const a of G.animals.list) {
+      if (!a.alive) continue;
+      const d = a.pos.distanceTo(this.pos) - a.radius;
+      if (d < bd) { bd = d; best = Math.atan2(a.pos.x - this.pos.x, a.pos.z - this.pos.z); }
+    }
+    this.yaw = best ?? this.camYaw + Math.PI;
+    this.vel.x += Math.sin(this.yaw) * 4.5; this.vel.z += Math.cos(this.yaw) * 4.5;
+    this.upperHold = 0.46;
+    this.play(this.upper, this.meleeAlt ? 'Melee_1H_Attack_Slice_Horizontal_U' : 'Melee_1H_Attack_Stab_U', 0.05, true, 2.2);
+    this.dagger.visible = true;
+    if (this.weaponObj?.parent === this.handR) this.weaponObj.visible = false;
+    audio.play('throw', { volume: 0.6, rate: 1.3 });
+    this.noise = Math.max(this.noise, 0.5);
+  }
   private hands(w: WeaponDef) { return w.model === 'crossbow_1handed' ? '1H' : '2H'; }
   private bowBlend = 0;
   private stepSound() {
@@ -377,7 +488,7 @@ export class Player {
 
   private shoot(w: WeaponDef, power: number) {
     const origin = new THREE.Vector3(), dir = new THREE.Vector3();
-    this.aimRay(origin, dir);
+    this.aimRay(origin, dir, Projectiles.speed(w, power));
     if (this.sway > 0.02) {
       dir.x += (Math.random() - 0.5) * 0.05 * this.sway; dir.y += (Math.random() - 0.5) * 0.05 * this.sway; dir.normalize();
     }
@@ -390,6 +501,7 @@ export class Player {
   }
 
   private animate(hs: number, sprinting: boolean, w: WeaponDef | null) {
+    if (this.cine) { this.play(this.lower, 'Idle_A_L', 0.2); this.play(this.upper, this.cine.anim + '_U', 0.2); return; }
     // lower body
     let lo = 'Idle_A', ls = 1;
     if (!this.grounded && Math.abs(this.vel.y) > 2.5) lo = 'Jump_Idle';
@@ -417,6 +529,19 @@ export class Player {
 
   private updateCamera(dt: number, w: WeaponDef | null) {
     const cam = G.camera, t = G.zone.terrain;
+    if (this.cine) {
+      // bench cutscene: slow orbit around the hunter at work
+      this.cine.angle += dt * 0.1;
+      const first = !this.cineOn; this.cineOn = true;
+      this.fov = damp(this.fov, 42, 6, dt);
+      cam.fov = this.fov; cam.updateProjectionMatrix();
+      const want = _n.set(this.pos.x + Math.sin(this.cine.angle) * 3.3, this.pos.y + 1.9, this.pos.z + Math.cos(this.cine.angle) * 3.3);
+      if (first) this.camPos.copy(want); else this.camPos.lerp(want, 1 - Math.exp(-3 * dt));
+      cam.position.copy(this.camPos);
+      cam.lookAt(this.pos.x, this.pos.y + 1.05, this.pos.z);
+      return;
+    }
+    this.cineOn = false;
     const aim = this.aiming;
     this.camDist = damp(this.camDist, aim ? 2.7 : this.crouching ? 4.0 : 5.2, 8, dt);
     this.camSide = damp(this.camSide, aim ? 1.05 : 0.35, 8, dt);

@@ -85,7 +85,7 @@ const padHit = (i: number) => !!padNow[i] && !padPrev[i];
 const padUp = (i: number) => !padNow[i] && !!padPrev[i];
 
 // Standard gamepad mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 Back, 9 Start, 10 LS, 11 RS, 12-15 dpad U D L R
-export const force: { aim?: boolean; fire?: boolean; fireHit?: boolean; my?: number } = {};
+export const force: { aim?: boolean; fire?: boolean; fireHit?: boolean; my?: number; melee?: boolean } = {};
 (window as any).__force = force;
 export const input = {
   moveX: () => { let v = padAxes[0]; if (keys.has('KeyD') || keys.has('ArrowRight')) v += 1; if (keys.has('KeyA') || keys.has('ArrowLeft')) v -= 1; return Math.max(-1, Math.min(1, v)); },
@@ -99,6 +99,7 @@ export const input = {
   fire: () => mouse[0] || pad(7) || !!force.fire,
   fireHit: () => mousePressed[0] || padHit(7) || !!force.fireHit,
   fireUp: () => mouseReleased[0] || padUp(7),
+  meleeHit: () => pressed.has('KeyF') || mousePressed[1] || padHit(3) || !!force.melee,
   interactHit: () => pressed.has('KeyE') || padHit(2),
   interact: () => keys.has('KeyE') || pad(2),
   nextWeapon: () => wheel > 0 || padHit(5) || pressed.has('KeyQ'),

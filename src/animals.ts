@@ -9,7 +9,7 @@ import { PLAY, TOWN_R } from './terrain';
 import { angleDiff, clamp, damp, rng } from './util';
 import type { Zone } from './world';
 
-type State = 'idle' | 'wander' | 'alert' | 'flee' | 'chase' | 'attack' | 'recover' | 'dead';
+type State = 'idle' | 'wander' | 'alert' | 'flee' | 'chase' | 'attack' | 'recover' | 'stagger' | 'dead';
 interface Metrics { scalePer: number; nativeH: number; nativeLen: number }
 const metricsCache = new Map<string, Metrics>();
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3(), _box = new THREE.Box3();
@@ -197,7 +197,8 @@ export class Animal {
     else if (d < 13) this.startChase();
   }
 
-  onHit(dmg: number, part: string, unaware: boolean, weaponId: string): boolean {
+  private staggerT = 0;
+  onHit(dmg: number, part: string, unaware: boolean, weaponId: string, stagger = 0.35): boolean {
     if (!this.alive) return false;
     if (this.hits === 0) this.firstHitUnaware = unaware;
     this.hits++;
@@ -216,7 +217,11 @@ export class Animal {
       // cornered stags fight back sometimes
       if (this.def.damage > 0 && this.pos.distanceTo(G.player.pos) < 9 && Math.random() < 0.5) this.startChase(false);
       else { this.startFlee(); this.alertGroup('flee'); }
-    } else this.startChase();
+    } else {
+      // aggressive animals flinch before pressing the attack again
+      this.startChase();
+      if (this.def.behaviour !== 'boss' || stagger > 0.5) { this.state = 'stagger'; this.staggerT = this.def.behaviour === 'boss' ? stagger * 0.5 : stagger; this.t = 0; }
+    }
     return false;
   }
 
@@ -315,7 +320,7 @@ export class Animal {
         this.anim('run', 0.15, false, clamp(this.speed / this.def.speed, 0.6, 1.3) * 1.15);
         if (d < reach && Math.abs(angleDiff(this.yaw, toYaw)) < 0.9 && !p.dead) {
           this.state = 'attack'; this.t = 0; this.hitDone = false;
-          this.anim('attack', 0.08, true, 1.25);
+          this.anim('attack', 0.1, true, 1.0);
         } else if (p.dead || d > 80 || this.t > (defensive ? 9 : 26) || this.zone.inTown(p.pos, 2) || (this.def.legendary && this.pos.distanceTo(this.home) > 120)) {
           this.state = 'wander'; this.goal.set(this.home.x, this.home.z); this.timer = 20; this.meter = 0.3; this.engaged = false;
           if (this.def.legendary) { this.hp = Math.min(this.def.hp, this.hp + this.def.hp * 0.25); G.game.onLegendDisengage(this); }
@@ -325,18 +330,27 @@ export class Animal {
       case 'attack': {
         this.speed = damp(this.speed, 0, 5, dt);
         this.yaw += clamp(angleDiff(this.yaw, toYaw), -3 * dt, 3 * dt);
-        if (!this.hitDone && this.t > 0.32) {
+        if (!this.hitDone && this.t > 0.46) {
           this.hitDone = true;
           if (d < this.def.length * 0.5 + 1.7 && Math.abs(angleDiff(this.yaw, toYaw)) < 1.2) p.hurt(this.def.damage, this.pos);
         }
-        if (this.t > 0.85) { this.state = 'recover'; this.t = 0; this.fleeYaw = toYaw + Math.PI + (Math.random() < 0.5 ? 0.9 : -0.9); }
+        if (this.t > 1.0) { this.state = 'recover'; this.t = 0; this.fleeYaw = toYaw + Math.PI + (Math.random() < 0.5 ? 0.9 : -0.9); }
+        break;
+      }
+      case 'stagger': {
+        // knocked back, open to a follow-up
+        const away = toYaw + Math.PI;
+        const nx = this.pos.x + Math.sin(away) * 3.2 * dt, nz = this.pos.z + Math.cos(away) * 3.2 * dt;
+        if (this.t < 0.25 && this.ok(nx, nz)) { this.pos.x = nx; this.pos.z = nz; }
+        this.speed = 0;
+        if (this.t > this.staggerT) { this.state = 'chase'; this.t = 0; }
         break;
       }
       case 'recover': {
         // back off and circle before coming in again
         this.move(this.fleeYaw, this.def.speed * 0.6, dt, 4);
         this.anim('run', 0.2, false, 0.9);
-        if (this.t > (this.def.behaviour === 'boss' ? 1.1 : 1.5)) { this.state = 'chase'; this.t = Math.min(this.t, 0); }
+        if (this.t > (this.def.behaviour === 'boss' ? 1.2 : 2.0)) { this.state = 'chase'; this.t = Math.min(this.t, 0); }
         break;
       }
     }

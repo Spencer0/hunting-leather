@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import type { Animal } from './animals';
 import { audio } from './audio';
 import { G } from './ctx';
-import { GEAR, ITEMS, MAX_LEVEL, PERKS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, TIPS, WEAPONS, ZONES, ZONE_ORDER, xpForLevel, type GearSlot, type WeaponDef } from './data';
+import { GEAR, GOODS_QUALITY, ITEMS, MAX_LEVEL, PERKS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, TIPS, WEAPONS, ZONES, ZONE_ORDER, gridKey, patternCells, xpForLevel, type GearSlot, type RecipeDef, type WeaponDef } from './data';
+import { Minigame, type MiniOpts } from './minigame';
 import { icon } from './icons';
 import { input, lockPointer, locked, unlockPointer, usingPad } from './input';
 import { RANK_TITLES, S, activeWeapon, addItem, ammoCap, buyPrice, canBuyPerk, capacity, count, countItem, deleteSlot, maxHp, maxStamina, perk, readSlot, saveSettings, sellValue, settings, splitKey, totalWeight, zoneIndex, type Save } from './state';
@@ -11,11 +12,12 @@ import { MAP_SPAN } from './terrain';
 import { clamp, fmtTime, pick } from './util';
 import type { StationKind } from './world';
 
-type PanelKind = StationKind | 'journal' | 'pause' | 'options' | 'controls';
+type PanelKind = StationKind | 'journal' | 'pause' | 'options' | 'controls' | 'mini';
 const $ = (html: string): HTMLElement => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild as HTMLElement; };
 const coin = (n: number) => `${icon('coin', '#e0b040', 18)}${n}`;
 const itemIcon = (key: string, size = 36) => { const it = ITEMS[splitKey(key)[0]]; return it ? icon(it.icon, it.color, size) : ''; };
-const qTag = (q: number) => (q === 1 ? '' : `<span class="tag q${q}">${QUALITY_NAMES[q]}</span>`);
+const qTag = (q: number, goods = false) => (q === 1 ? '' : `<span class="tag q${q}">${goods ? GOODS_QUALITY[q] : QUALITY_NAMES[q]}</span>`);
+const keyTag = (key: string) => { const [id, q] = splitKey(key); const c = ITEMS[id]?.cat; return c === 'hide' || c === 'goods' ? qTag(q, c === 'goods') : ''; };
 const _v = new THREE.Vector3();
 
 export class UI {
@@ -32,16 +34,15 @@ export class UI {
   constructor() {
     this.hud = $(`<div id="hud" class="off">
       <div id="vig"></div><div id="lowhp"></div><div id="hurt"></div>
-      <div id="objective" class="hud-box"><b>Objective</b><span></span></div>
+      <div id="objective" class="hud-box"><span></span></div>
       <div id="compass" class="hud-box"><canvas width="840" height="68"></canvas></div>
       <div id="eye" class="hud-box"><span></span><div class="fill"><i></i></div></div>
       <div id="boss" class="hidden"><h3 class="cz"></h3><div class="bar"><i></i></div></div>
       <div id="mini"><canvas width="328" height="328"></canvas><div id="clock" class="hud-box"></div></div>
       <div id="status" class="hud-box"><div id="rank">1<small>Greenhorn</small></div><div class="bars">
-        <div class="statline"><span id="hpt"></span><span class="coin" id="gold"></span></div>
-        <div class="bar hp"><i></i></div><div class="bar st"><i></i></div><div class="bar xp"><i></i></div>
-        <div class="statline"><span id="xpt" class="muted"></span><span class="wt" id="wt"></span></div></div></div>
-      <div id="wname"></div><div id="weapons" class="hud-box"></div>
+        <div class="statline"><span id="hpt"></span><span class="wt" id="wt"></span><span class="coin" id="gold"></span></div>
+        <div class="bar hp"><i></i></div><div class="bar st"><i></i></div><div class="bar xp"><i></i></div></div></div>
+      <div id="weapons" class="hud-box"></div>
       <canvas id="cross" width="160" height="160"></canvas><div id="hitm"></div>
       <div id="clicker" class="hud-box hidden">Click to look around</div>
       <div id="prompt" class="hud-box hidden"></div><div id="toasts"></div><div id="hint" class="hud-box off"></div>
@@ -51,7 +52,7 @@ export class UI {
     this.root.append(this.fadeEl);
     const q = (s: string) => this.hud.querySelector(s) as HTMLElement;
     this.promptEl = q('#prompt'); this.hintEl = q('#hint'); this.bannerEl = q('#banner'); this.toastsEl = q('#toasts'); this.dmgEl = q('#dmg'); this.bossEl = q('#boss');
-    for (const id of ['clicker', 'objective', 'eye', 'rank', 'hpt', 'gold', 'xpt', 'wt', 'wname', 'weapons', 'clock', 'lowhp', 'hurt', 'hitm', 'cross']) this.els[id] = q('#' + id);
+    for (const id of ['clicker', 'objective', 'eye', 'rank', 'hpt', 'gold', 'wt', 'weapons', 'clock', 'lowhp', 'hurt', 'hitm', 'cross']) this.els[id] = q('#' + id);
     this.mini = (q('#mini canvas') as HTMLCanvasElement).getContext('2d')!;
     this.comp = (q('#compass canvas') as HTMLCanvasElement).getContext('2d')!;
     this.cross = (q('#cross') as HTMLCanvasElement).getContext('2d')!;
@@ -127,14 +128,13 @@ export class UI {
     const need = xpForLevel(S.level);
     this.set('xp', `${S.level}:${S.xp}`, () => {
       (this.hud.querySelector('.bar.xp i') as HTMLElement).style.width = S.level >= MAX_LEVEL ? '100%' : `${(S.xp / need) * 100}%`;
-      e.xpt.textContent = S.level >= MAX_LEVEL ? 'Max rank' : `${S.xp} / ${need} xp`;
       e.rank.innerHTML = `${S.level}<small>${RANK_TITLES[S.level]}</small>`;
     });
     this.set('gold', S.gold, (v) => { e.gold.innerHTML = coin(+v); });
     const w = totalWeight(), cap = capacity();
-    this.set('wt', `${w}/${cap}`, (v) => { e.wt.textContent = `Pack ${v}`; e.wt.classList.toggle('over', w > cap); });
-    this.set('obj', G.game.objective() + (S.perkPoints ? `|${S.perkPoints}` : ''), () => { e.objective.querySelector('span')!.innerHTML = G.game.objective() + (S.perkPoints ? `<br><span style="color:#ffe070">★ ${S.perkPoints} skill point${S.perkPoints > 1 ? 's' : ''} to spend (Tab)</span>` : ''); });
-    this.set('clock', `${Math.floor(S.time * 6)}|${S.day}|${G.env.night > 0.5}`, () => { e.clock.innerHTML = `${icon(G.env.night > 0.5 ? 'moon' : 'sun', '#ffd866', 18)} Day ${S.day} · ${fmtTime(S.time)}`; });
+    this.set('wt', `${w}/${cap}`, (v) => { e.wt.textContent = w > cap * 0.7 ? `Pack ${v}` : ''; e.wt.classList.toggle('over', w > cap); });
+    this.set('obj', G.game.objective() + (S.perkPoints ? `|${S.perkPoints}` : ''), () => { e.objective.querySelector('span')!.innerHTML = G.game.objective() + (S.perkPoints ? `<br><span style="color:#ffe070">★ Skill point ready — Tab</span>` : ''); });
+    this.set('clock', `${Math.floor(S.time * 6)}|${G.env.night > 0.5}`, () => { e.clock.innerHTML = `${icon(G.env.night > 0.5 ? 'moon' : 'sun', '#ffd866', 18)} ${fmtTime(S.time)}`; });
     e.lowhp.style.opacity = String(hp < mh * 0.3 ? 0.5 + Math.sin(G.time * 5) * 0.3 : 0);
     // weapons
     const act = activeWeapon();
@@ -145,7 +145,6 @@ export class UI {
         const wd = WEAPONS[id], n = count(wd.ammo);
         return `<div class="wslot ${i === S.active ? 'on' : ''}"><span class="key">${i + 1}</span>${icon(wd.kind === 'bow' ? 'bow' : wd.kind === 'crossbow' ? 'crossbow' : ITEMS[wd.ammo].icon, wd.color, 48)}<span class="ammo ${n <= 3 ? 'low' : ''}">${n}</span>${wd.kind === 'crossbow' && i === S.active ? '<div class="rl"><i></i></div>' : ''}</div>`;
       }).join('');
-      e.wname.textContent = act ? act.name : '';
     });
     if (act?.kind === 'crossbow') { const rl = e.weapons.querySelector('.rl i') as HTMLElement | null; if (rl) rl.style.width = p.loaded ? '100%' : p.reload > 0 ? `${(1 - p.reload / (act.time + 0.35)) * 100}%` : '0%'; }
     // crosshair
@@ -245,16 +244,36 @@ export class UI {
   }
 
   // ---------- panels ----------
-  open(kind: PanelKind, onClose?: () => void) {
+  private mg: Minigame | null = null;
+  get miniActive() { return !!this.mg; }
+  /** Run a bench minigame with the camera circling the hunter at work. */
+  startMini(o: MiniOpts, anim: 'Working_A' | 'Hammering') {
     this.close(true);
-    this.kind = kind; this.isOpen = true; this.onClose = onClose ?? null;
-    this.tab = ''; this.sel = ''; this.focusIdx = -1;
+    this.kind = 'mini'; this.isOpen = true;
+    G.player.frozen = true;
+    G.game.benchScene(true, anim);
+    this.showHud(false);
+    const done = o.onDone;
+    this.mg = new Minigame({ ...o, onDone: (score) => {
+      this.mg?.destroy(); this.mg = null; this.panel = null; this.kind = null; this.isOpen = false;
+      G.game.benchScene(false);
+      this.showHud(true);
+      done(score);
+    } });
+    this.panel = this.mg.el;
+    this.root.append(this.mg.el);
+  }
+  tick(dt: number) { this.mg?.tick(dt, input.uiAccept() || input.keyHit('Space') || input.keyHit('KeyE')); }
+  open(kind: PanelKind, tab = '') {
+    this.close(true);
+    this.kind = kind; this.isOpen = true; this.onClose = null;
+    this.tab = tab; this.sel = ''; this.focusIdx = -1;
     G.player.frozen = true;
     unlockPointer();
     this.render();
   }
   close(silent = false) {
-    if (!this.panel) return;
+    if (!this.panel || this.mg) return;
     this.panel.remove(); this.panel = null; this.kind = null; this.isOpen = false;
     if (G.player) G.player.frozen = false;
     if (!silent) { audio.play('ui_close'); if (G.game.playing) lockPointer(); }
@@ -319,21 +338,21 @@ export class UI {
       const order = ['goods', 'leather', 'fur', 'hide', 'trophy', 'meat'];
       keys.sort((a, b) => order.indexOf(ITEMS[splitKey(a)[0]].cat) - order.indexOf(ITEMS[splitKey(b)[0]].cat) || sellValue(b, S.zone) - sellValue(a, S.zone));
       const goods = keys.filter((k) => ITEMS[splitKey(k)[0]].cat === 'goods');
-      const top = $(`<div class="row" style="background:none"><div class="nm">${ZONES[S.zone].town} market <small>${Object.entries(bias).filter(([, v]) => v !== 1).map(([k, v]) => `${k} ${v > 1 ? '▲' : '▼'}${Math.round(Math.abs(v - 1) * 100)}%`).join(' · ') || 'Fair prices on everything'}</small></div></div>`);
+      const top = $(`<div class="row" style="background:none"><div class="nm"><small>${Object.entries(bias).filter(([, v]) => v !== 1).map(([k, v]) => `${k} ${v > 1 ? '▲' : '▼'}${Math.round(Math.abs(v - 1) * 100)}%`).join(' · ') || 'Fair prices'}</small></div></div>`);
       top.append(this.btn(`Sell all goods (${coin(goods.reduce((s, k) => s + sellValue(k, S.zone) * count(k), 0))})`, () => { goods.forEach((k) => G.game.sell(k, count(k))); this.render(); }, '', !goods.length));
       col.append(top);
-      if (!keys.length) col.append($('<p class="muted">Nothing to sell. Hunt, skin, tan and craft — then come back.</p>'));
+      if (!keys.length) col.append($('<p class="muted">Nothing to sell.</p>'));
       for (const k of keys) {
-        const [id, q] = splitKey(k), it = ITEMS[id], n = count(k), v = sellValue(k, S.zone);
+        const [id] = splitKey(k), it = ITEMS[id], n = count(k), v = sellValue(k, S.zone);
         const b = bias[it.cat] ?? 1;
         const tag = it.cat === 'hide' ? '<span class="tag down">raw</span>' : b > 1.05 ? '<span class="tag up">in demand</span>' : b < 0.95 ? '<span class="tag down">glut</span>' : '';
-        col.append(this.rowEl(itemIcon(k), `${it.name} ${it.cat === 'hide' ? qTag(q) : ''} ${tag}`, `×${n} · ${it.desc}`, coin(v), [
+        col.append(this.rowEl(itemIcon(k), `${it.name} ${keyTag(k)} ${tag}`, `×${n}`, coin(v), [
           this.btn('Sell 1', () => { G.game.sell(k, 1); this.render(); }, 'alt'), this.btn(`All`, () => { G.game.sell(k, n); this.render(); }, '', n < 2)]));
       }
     } else {
       for (const id of G.game.shopStock('merchant')) {
         const it = ITEMS[id], pr = buyPrice(id);
-        col.append(this.rowEl(itemIcon(id), it.name, `You have ${count(id)} · ${it.desc}`, coin(pr), [
+        col.append(this.rowEl(itemIcon(id), it.name, `${it.desc} · have ${count(id)}`, coin(pr), [
           this.btn('Buy 1', () => { G.game.buy(id, 1); this.render(); }, 'alt', S.gold < pr), this.btn('Buy 5', () => { G.game.buy(id, 5); this.render(); }, '', S.gold < pr * 5)]));
       }
     }
@@ -342,71 +361,99 @@ export class UI {
   private weaponStats(w: WeaponDef) {
     const cur = WEAPONS[S.slots[w.kind === 'bow' ? 0 : w.kind === 'crossbow' ? 1 : 2]];
     const d = cur && cur !== w ? w.damage - cur.damage : 0;
-    return `Damage ${w.damage}${d ? ` <span style="color:${d > 0 ? '#3a8a2a' : '#b03020'}">(${d > 0 ? '+' : ''}${d})</span>` : ''} · ${w.kind === 'bow' ? 'Draw' : w.kind === 'crossbow' ? 'Reload' : 'Wind-up'} ${w.time}s · Speed ${w.speed}`;
+    return `Damage ${w.damage}${d ? ` <span style="color:${d > 0 ? '#3a8a2a' : '#b03020'}">(${d > 0 ? '+' : ''}${d})</span>` : ''} · ${w.kind === 'bow' ? 'draw' : w.kind === 'crossbow' ? 'reload' : 'throw'} ${w.time}s`;
   }
   private renderFletcher() {
-    const { body } = this.frame(this.npcName('fletcher'), ['Weapons', 'Ammunition']);
+    const { body } = this.frame(this.npcName('fletcher'), []);
     const col = $('<div class="col"></div>');
     body.append(col);
-    if (this.tab === 'Weapons') {
-      col.append($('<h3 class="sec">For sale</h3>'));
-      const stock = G.game.weaponStock().filter((id) => !S.weapons.includes(id));
-      if (!stock.length) col.append($('<p class="muted">You own everything on the rack. Bigger towns stock heavier weapons.</p>'));
-      for (const id of stock) {
-        const w = WEAPONS[id];
-        col.append(this.rowEl(icon(w.kind === 'bow' ? 'bow' : 'crossbow', w.color, 38), w.name, `${this.weaponStats(w)} — ${w.desc}`, coin(w.price), [this.btn('Buy', () => { G.game.buyWeapon(id); this.render(); }, '', S.gold < w.price)]));
-      }
-      col.append($('<h3 class="sec">Your weapons</h3>'));
-      for (const id of S.weapons) {
-        const w = WEAPONS[id], on = S.slots.includes(id);
-        col.append(this.rowEl(icon(w.kind === 'bow' ? 'bow' : 'crossbow', w.color, 38), w.name, this.weaponStats(w), on ? '<span class="tag">equipped</span>' : '', [this.btn('Equip', () => { G.game.equipWeapon(id); this.render(); }, 'alt', on)]));
-      }
-    } else {
-      col.append($(`<p class="muted" style="margin:0 0 8px">Quiver holds ${ammoCap()} arrows and ${ammoCap()} bolts. Buying a thrown weapon equips it in slot 3.</p>`));
-      for (const id of G.game.shopStock('fletcher')) {
-        const it = ITEMS[id], pr = buyPrice(id), quiver = id === 'arrow' || id === 'bolt';
-        const full = quiver && count(id) >= ammoCap();
-        col.append(this.rowEl(itemIcon(id), it.name, `You have ${count(id)}${quiver ? ` / ${ammoCap()}` : ''} · ${it.desc}`, coin(pr), [
-          this.btn('Buy 1', () => { G.game.buy(id, 1); this.render(); }, 'alt', S.gold < pr || full), this.btn('Buy 10', () => { G.game.buy(id, 10); this.render(); }, '', S.gold < pr * 2 || full)]));
-      }
+    const stock = G.game.weaponStock().filter((id) => !S.weapons.includes(id));
+    if (stock.length) col.append($('<h3 class="sec">Weapons</h3>'));
+    for (const id of stock) {
+      const w = WEAPONS[id];
+      col.append(this.rowEl(icon(w.kind === 'bow' ? 'bow' : 'crossbow', w.color, 38), w.name, this.weaponStats(w), coin(w.price), [this.btn('Buy', () => { G.game.buyWeapon(id); this.render(); }, '', S.gold < w.price)]));
+    }
+    col.append($(`<h3 class="sec">Ammunition <span class="muted" style="float:right;letter-spacing:0;text-transform:none">quiver holds ${ammoCap()}</span></h3>`));
+    for (const id of G.game.shopStock('fletcher')) {
+      const it = ITEMS[id], pr = buyPrice(id), quiver = id === 'arrow' || id === 'bolt';
+      const full = quiver && count(id) >= ammoCap();
+      col.append(this.rowEl(itemIcon(id), it.name, `have ${count(id)}${quiver ? ` / ${ammoCap()}` : ''}`, coin(pr), [
+        this.btn('Buy 1', () => { G.game.buy(id, 1); this.render(); }, 'alt', S.gold < pr || full), this.btn('Buy 10', () => { G.game.buy(id, 10); this.render(); }, '', S.gold < pr * 2 || full)]));
     }
   }
 
+  private grid: string[] = Array<string>(9).fill('');
+  private hand = '';
+  private recipeSel: RecipeDef | null = null;
   private renderTanner() {
-    const { body } = this.frame('Tanning Bench', ['Tan Hides', 'Craft']);
-    const col = $('<div class="col"></div>');
-    body.append(col);
-    if (this.tab === 'Tan Hides') {
-      col.append($(`<p class="muted" style="margin:0 0 8px">Each hide needs one measure of Tanning Salts (you have <b>${count('salt')}</b>). Better hides yield more leather. Legendary hides are too fine to cut — sell them whole.</p>`));
+    const { body } = this.frame('Tanning Bench', ['Tan', 'Craft']);
+    if (this.tab === 'Tan') {
+      const col = $('<div class="col"></div>');
+      body.append(col);
       const keys = Object.keys(S.inv).filter((k) => TANNING[splitKey(k)[0]]);
-      if (!keys.length) col.append($('<p>No hides to tan. Go and get some.</p>'));
+      col.append($(`<div class="row" style="background:none"><div class="nm"><small>${itemIcon('salt', 20)} Salts ${count('salt')} &nbsp; ${itemIcon('bark', 20)} Bark liquor ${count('bark')} (+1 leather) &nbsp;·&nbsp; time the scraping well for a bonus</small></div></div>`));
+      if (!keys.length) col.append($('<p class="muted">No hides to tan.</p>'));
       for (const k of keys) {
         const [id, q] = splitKey(k), it = ITEMS[id], rule = TANNING[id], n = count(k);
         const out = Math.max(1, rule[1] + (q === 2 ? 1 : q === 0 ? -1 : 0));
-        col.append(this.rowEl(itemIcon(k), `${it.name} ${qTag(q)}`, `×${n} → ${out} ${ITEMS[rule[0]].name} each`, itemIcon(rule[0], 30) + `×${out}`, [
-          this.btn('Tan 1', () => { G.game.tan(k, 1); this.render(); }, 'alt', !count('salt')), this.btn('Tan all', () => { G.game.tan(k, n); this.render(); }, '', !count('salt') || n < 2)]));
+        const go = (agent: 'salt' | 'bark') => this.startMini({ title: `Scraping the ${it.name.toLowerCase()}`, kind: 'scrape', strokes: 4, speed: 0.55 + (q === 2 ? 0.08 : 0), color: ITEMS[rule[0]].color,
+          onDone: (score) => { G.game.tan(k, 1, score, agent); this.open('tanner', 'Tan'); } }, 'Working_A');
+        col.append(this.rowEl(itemIcon(k), `${it.name} ${qTag(q)}`, `×${n} → ${itemIcon(rule[0], 18)} ${out}+`, '', [
+          this.btn('Tan', () => go('salt'), '', !count('salt')), this.btn('Bark tan', () => go('bark'), 'alt', !count('bark')),
+          this.btn(`Quick ×${Math.min(n, count('salt'))}`, () => { G.game.tan(k, n); this.render(); }, 'alt', !count('salt'))]));
       }
-    } else {
-      const side = $('<div class="col side detail"></div>');
-      let lastSec = '';
-      for (const r of RECIPES) {
-        if (r.rank > S.level + 3) continue;
-        if (r.section !== lastSec) { lastSec = r.section; col.append($(`<h3 class="sec">${r.section}</h3>`)); }
-        const owned = (r.out.gear && G.game.ownsGear(r.out.gear)) || (r.out.weapon && S.weapons.includes(r.out.weapon));
-        const locked = S.level < r.rank;
-        const needs = r.needs.map(([id, n]) => `<span class="need ${countItem(id) < n ? 'no' : ''}">${itemIcon(id, 20)}${countItem(id)}/${n}</span>`).join('');
-        const ic = r.out.item ? itemIcon(r.out.item) : r.out.gear ? icon(GEAR[r.out.gear].icon, GEAR[r.out.gear].color, 36) : icon(WEAPONS[r.out.weapon!].kind === 'bow' ? 'bow' : 'crossbow', WEAPONS[r.out.weapon!].color, 36);
-        const right = owned ? '<span class="tag">owned</span>' : locked ? `${icon('lock', '#8a7a6a', 18)} Rank ${r.rank}` : r.out.item ? coin(sellValue(r.out.item, S.zone)) : '';
-        const row = this.rowEl(ic, r.name, needs, right, [this.btn('Craft', () => { G.game.craft(r); this.render(); }, '', !G.game.canCraft(r))]);
-        row.addEventListener('mouseenter', () => {
-          const d = r.out.item ? ITEMS[r.out.item].desc : r.out.gear ? GEAR[r.out.gear].desc : `${this.weaponStats(WEAPONS[r.out.weapon!])}. ${WEAPONS[r.out.weapon!].desc}`;
-          side.innerHTML = `<h3>${r.name}</h3><p>${d}</p>${r.out.item ? `<div class="kv"><span>Sells here for</span><span>${coin(sellValue(r.out.item, S.zone))}</span></div>` : ''}<div class="kv"><span>Requires</span><span>Rank ${r.rank}</span></div><div class="kv"><span>Experience</span><span>+${r.xp} xp</span></div><h3 class="sec" style="margin-top:14px">Materials</h3>${r.needs.map(([id, n]) => `<div class="kv"><span>${ITEMS[id].name}</span><span style="color:${countItem(id) < n ? '#b03020' : 'inherit'}">${countItem(id)} / ${n}</span></div>`).join('')}`;
-        });
-        col.append(row);
-      }
-      side.innerHTML = '<p class="muted">Hover a recipe to see what it makes. Trade goods are for selling; gear is worn at once and makes you a better hunter.</p>';
-      body.append(side);
+      return;
     }
+    // ----- Craft: recipe book | 3x3 bench | materials -----
+    body.classList.add('bench');
+    const book = $('<div class="col book"></div>'), mid = $('<div class="benchmid"></div>');
+    body.append(book, mid);
+    let last = '';
+    for (const r of RECIPES) {
+      if (r.rank > S.level + 2) continue;
+      if (r.section !== last) { last = r.section; book.append($(`<h3 class="sec">${r.section}</h3>`)); }
+      const owned = (r.out.gear && G.game.ownsGear(r.out.gear)) || (r.out.weapon && S.weapons.includes(r.out.weapon));
+      const locked = S.level < r.rank, can = G.game.canCraft(r);
+      const ic = r.out.item ? itemIcon(r.out.item, 30) : r.out.gear ? icon(GEAR[r.out.gear].icon, GEAR[r.out.gear].color, 30) : icon(WEAPONS[r.out.weapon!].kind === 'bow' ? 'bow' : 'crossbow', WEAPONS[r.out.weapon!].color, 30);
+      const b = $(`<button class="rec ${this.recipeSel === r ? 'sel' : ''} ${can ? 'can' : ''} ${owned || locked ? 'dim' : ''}">${ic}<span>${r.name}</span><em>${owned ? '✓' : locked ? `Rank ${r.rank}` : can ? '●' : ''}</em></button>`);
+      b.addEventListener('click', () => { this.recipeSel = r; this.grid = patternCells(r.pattern); audio.play('ui_page'); this.render(); });
+      book.append(b);
+    }
+    const match = RECIPES.find((r) => r.key === gridKey(this.grid)) ?? null;
+    const used: Record<string, number> = {};
+    const gridEl = $('<div class="cgrid"></div>');
+    this.grid.forEach((id, i) => {
+      if (id) used[id] = (used[id] ?? 0) + 1;
+      const lack = id && used[id] > count(id);
+      const c = $(`<button class="cell ${lack ? 'lack' : ''}">${id ? itemIcon(id, 44) : ''}</button>`);
+      c.addEventListener('click', () => { this.grid[i] = this.grid[i] === this.hand || !this.hand ? '' : this.hand; this.recipeSel = null; audio.play('ui_move'); this.render(); });
+      c.addEventListener('contextmenu', (e) => { e.preventDefault(); this.grid[i] = ''; this.render(); });
+      gridEl.append(c);
+    });
+    const outEl = $('<div class="cout"></div>');
+    if (match) {
+      const o = match.out, ic = o.item ? itemIcon(o.item, 60) : o.gear ? icon(GEAR[o.gear].icon, GEAR[o.gear].color, 60) : icon(WEAPONS[o.weapon!].kind === 'bow' ? 'bow' : 'crossbow', WEAPONS[o.weapon!].color, 60);
+      const desc = o.item ? `Sells for ${coin(sellValue(o.item + ':1', S.zone))}` : o.gear ? GEAR[o.gear].desc : this.weaponStats(WEAPONS[o.weapon!]);
+      const why = S.level < match.rank ? `Needs Rank ${match.rank}` : (o.gear && G.game.ownsGear(o.gear)) || (o.weapon && S.weapons.includes(o.weapon)) ? 'Already owned' : !G.game.canCraft(match) ? 'Missing materials' : '';
+      outEl.innerHTML = `<div class="cell big">${ic}</div><b>${match.name}</b><small>${why ? `<span style="color:#b03020">${why}</span>` : desc}</small>`;
+      const r = match;
+      outEl.append(this.btn('Craft', () => this.startMini({ title: `Stitching the ${r.name.toLowerCase()}`, kind: 'stitch', strokes: 4, speed: 0.6 + r.rank * 0.02, color: ITEMS[r.needs[0][0]].color,
+        onDone: (score) => { G.game.craft(r, score); this.open('tanner', 'Craft'); } }, 'Hammering'), '', !G.game.canCraft(r)));
+    } else outEl.innerHTML = `<div class="cell big"></div><small class="muted">${this.grid.some(Boolean) ? 'No such pattern' : 'Pick a recipe, or lay out materials'}</small>`;
+    const bench = $('<div class="cbench"></div>');
+    bench.append(gridEl, $('<div class="carrow">➜</div>'), outEl);
+    const pal = $('<div class="cpal"></div>');
+    const mats = ['leather_light', 'leather_sturdy', 'leather_heavy', 'fur_soft', 'fur_thick', 'thread', 'rivets', 'sinew', 'antler', 'fang', 'horn', 'antler_monarch', 'horn_ironhorn'].filter((id) => count(id) > 0);
+    if (!mats.includes(this.hand)) this.hand = '';
+    for (const id of mats) {
+      const left = count(id) - (used[id] ?? 0);
+      const c = $(`<button class="cell ${this.hand === id ? 'sel' : ''}" title="${ITEMS[id].name}">${itemIcon(id, 40)}<span class="n">${left}</span></button>`);
+      c.addEventListener('click', () => { this.hand = this.hand === id ? '' : id; audio.play('ui_move'); this.render(); });
+      pal.append(c);
+    }
+    if (!mats.length) pal.append($('<small class="muted">No materials yet — tan some hides, buy thread from the merchant.</small>'));
+    pal.append(this.btn('Clear', () => { this.grid.fill(''); this.recipeSel = null; this.render(); }, 'alt x', !this.grid.some(Boolean)));
+    mid.append(bench, pal);
   }
 
   private renderInn() {
@@ -414,125 +461,115 @@ export class UI {
     const zi = zoneIndex(S.zone), cost = 4 + zi * 6;
     const leg = SPECIES[G.zone.def.legendary];
     const rumour = !S.legends.includes(leg.id) && Math.random() < 0.5 ? `They say ${leg.name} keeps to the far ${G.zone.terrain.lair.x < 0 ? 'north-west' : 'north-east'}, where the dead trees stand in a ring. ${leg.blurb}` : pick(TIPS);
-    const st = $(`<div class="stack" style="flex:1"><div class="say"><b>${this.npcName('inn')}</b>${this.sel || `Welcome to ${ZONES[S.zone].town}. A bed's ${cost} coin, the gossip is free.`}</div></div>`);
-    st.append(this.btn(`Sleep until morning — ${coin(cost)} <span class="muted">(heals, saves)</span>`, () => G.game.sleep(cost), '', S.gold < cost),
+    const st = $(`<div class="stack" style="flex:1"><div class="say"><b>${this.npcName('inn')}</b>${this.sel || `A bed is ${cost} coin. Sleeping heals you and saves the game.`}</div></div>`);
+    st.append(this.btn(`Sleep until morning — ${coin(cost)}`, () => G.game.sleep(cost), '', S.gold < cost),
       this.btn('Hear a rumour', () => { this.sel = rumour; this.render(); }, 'alt'), this.btn('Save game', () => { G.game.save(); }, 'alt'), this.btn('Leave', () => this.close(), 'alt'));
     body.append(st);
   }
   private renderBedroll() {
     const { body } = this.frame('Bedroll', [], true);
-    const st = $('<div class="stack" style="flex:1"><div class="say">A dry spot out of the wind. You could sleep here until dawn.</div></div>');
-    st.append(this.btn('Rest until morning <span class="muted">(heals, saves)</span>', () => G.game.sleep(0)), this.btn('Leave', () => this.close(), 'alt'));
+    const st = $('<div class="stack" style="flex:1"><div class="say">Sleeping heals you and saves the game.</div></div>');
+    st.append(this.btn('Rest until morning', () => G.game.sleep(0)), this.btn('Leave', () => this.close(), 'alt'));
     body.append(st);
   }
   private renderCamp() {
     const { body } = this.frame('Campfire', [], true);
     const n = count('meat');
-    const st = $(`<div class="stack" style="flex:1"><div class="say">The fire is warm. You have <b style="display:inline;font-size:inherit">${n}</b> game meat. Each cut restores 14 health. (${Math.ceil(S.hp)} / ${maxHp()})</div></div>`);
+    const st = $(`<div class="stack" style="flex:1"><div class="say">${n} game meat · each cut restores 14 health · ${Math.ceil(S.hp)} / ${maxHp()}</div></div>`);
     st.append(this.btn('Roast 1 cut', () => { G.game.cook(1); this.render(); }, '', !n || S.hp >= maxHp()),
       this.btn('Roast until healed', () => { G.game.cook(Math.ceil((maxHp() - S.hp) / 14)); this.render(); }, '', !n || S.hp >= maxHp()), this.btn('Leave', () => this.close(), 'alt'));
     body.append(st);
   }
 
   private renderBoard() {
-    const { body } = this.frame(`${ZONES[S.zone].town} Notice Board`, ['Notices', 'My Contracts']);
+    const { body } = this.frame('Notice Board', []);
     const col = $('<div class="col"></div>');
     body.append(col);
     const line = (c: (typeof S.contracts)[0]) => {
-      const ic = c.kind === 'hunt' ? icon('target', '#c8483a', 36) : itemIcon(c.item);
       const have = c.kind === 'hunt' ? c.have : countItem(c.item, c.minQ);
-      return { ic, name: c.text, sub: `Posted by ${c.giver}${c.zone !== S.zone ? ` in ${ZONES[c.zone].town}` : ''} · ${Math.min(have, c.qty)}/${c.qty}`, right: `${coin(c.gold)} <span class="muted">+${c.xp}xp</span>` };
+      return { ic: c.kind === 'hunt' ? icon('target', '#c8483a', 36) : itemIcon(c.item), name: c.text, sub: `${Math.min(have, c.qty)}/${c.qty}${c.zone !== S.zone ? ` · deliver in ${ZONES[c.zone].town}` : ''}`, right: `${coin(c.gold)}` };
     };
-    if (this.tab === 'Notices') {
-      const offers = S.board[S.zone] ?? [];
-      if (!offers.length) col.append($('<p class="muted">Nothing new pinned up. Fresh notices go up each morning.</p>'));
-      for (const c of offers) { const l = line(c); col.append(this.rowEl(l.ic, l.name, l.sub, l.right, [this.btn('Accept', () => { G.game.acceptContract(c); this.render(); })])); }
-      const leg = SPECIES[G.zone.def.legendary];
-      col.append($('<h3 class="sec">Rumours</h3>'), $(`<div class="say"><b>${S.legends.includes(leg.id) ? '✓ ' : ''}${leg.name}</b>${leg.blurb}${S.legends.includes(leg.id) ? ' — You ended the legend.' : ' Look for the ring of dead trees in the far north.'}</div>`));
-    } else {
-      if (!S.contracts.length) col.append($('<p class="muted">No contracts. Check the notices.</p>'));
-      for (const c of S.contracts) {
-        const l = line(c), ready = G.game.contractReady(c) && c.kind !== 'hunt';
-        col.append(this.rowEl(l.ic, l.name, l.sub, l.right, [this.btn('Deliver', () => { G.game.completeContract(c); this.render(); }, '', !ready), this.btn('Drop', () => { G.game.abandonContract(c); this.render(); }, 'red')]));
-      }
+    if (S.contracts.length) col.append($('<h3 class="sec">Your contracts</h3>'));
+    for (const c of S.contracts) {
+      const l = line(c), ready = G.game.contractReady(c) && c.kind !== 'hunt' && c.zone === S.zone;
+      col.append(this.rowEl(l.ic, l.name, l.sub, l.right, [this.btn('Deliver', () => { G.game.completeContract(c); this.render(); }, '', !ready), this.btn('Drop', () => { G.game.abandonContract(c); this.render(); }, 'red')]));
     }
+    col.append($('<h3 class="sec">Notices</h3>'));
+    const offers = S.board[S.zone] ?? [];
+    if (!offers.length) col.append($('<p class="muted">Nothing new. Fresh notices go up each morning.</p>'));
+    for (const c of offers) { const l = line(c); col.append(this.rowEl(l.ic, l.name, c.kind === 'hunt' ? 'pays on the last kill' : 'deliver here', l.right, [this.btn('Accept', () => { G.game.acceptContract(c); this.render(); })])); }
   }
 
   private renderWagon() {
     const { body } = this.frame(this.npcName('wagon'), [], false);
     const col = $('<div class="col"></div>');
     body.append(col);
-    col.append($('<div class="say"><b>Wagoner</b>Where to? I only carry hunters the guild vouches for — the far roads eat greenhorns.</div>'));
-    for (const id of ZONE_ORDER) {
+        for (const id of ZONE_ORDER) {
       const z = ZONES[id], here = id === S.zone, locked = S.level < z.rank;
       const animals = z.spawns.map((s) => SPECIES[s[0]].name).join(', ');
-      col.append(this.rowEl(icon(here ? 'map' : locked ? 'lock' : 'wagon', locked ? '#8a7a6a' : '#99643a', 38), `${z.name} <span class="tag">${z.town}</span>`, `${z.subtitle} · ${animals}`,
+      col.append(this.rowEl(icon(here ? 'map' : locked ? 'lock' : 'wagon', locked ? '#8a7a6a' : '#99643a', 38), `${z.name} <span class="tag">${z.town}</span>`, animals,
         here ? '<span class="tag up">you are here</span>' : locked ? `Rank ${z.rank}` : z.fare ? coin(z.fare) : 'Free', [this.btn('Travel', () => G.game.travel(id), '', here || locked || S.gold < z.fare)]));
     }
   }
 
   private renderJournal() {
-    const { body } = this.frame('Hunter’s Journal', ['Pack', 'Gear', 'Skills', 'Contracts', 'Bestiary', 'Map']);
+    const { body } = this.frame('Journal', ['Pack', 'Skills', 'Map']);
     const col = $('<div class="col"></div>');
     body.append(col);
     if (this.tab === 'Pack') {
-      const grid = $('<div class="grid"></div>'), side = $('<div class="col side detail"></div>');
+      const side = $('<div class="col side detail"></div>');
+      // loadout strip: weapons (click to cycle) + worn gear
+      const load = $('<div class="grid" style="margin-bottom:12px"></div>');
+      (['bow', 'crossbow', 'thrown'] as const).forEach((kind, i) => {
+        const owned = kind === 'thrown' ? Object.values(WEAPONS).filter((w) => w.kind === 'thrown' && count(w.ammo) > 0).map((w) => w.id) : S.weapons.filter((id) => WEAPONS[id].kind === kind);
+        const cur = S.slots[i] ? WEAPONS[S.slots[i]] : null;
+        const c = $(`<button class="cell load ${this.sel === 'w' + i ? 'sel' : ''}">${cur ? icon(kind === 'thrown' ? ITEMS[cur.ammo].icon : kind, cur.color, 46) : icon(kind === 'thrown' ? 'knife' : kind, '#bbb', 46)}<span class="n">${i + 1}</span></button>`);
+        c.addEventListener('click', () => {
+          if (this.sel === 'w' + i && owned.length > 1) G.game.equipWeapon(owned[(owned.indexOf(S.slots[i]) + 1) % owned.length]);
+          this.sel = 'w' + i; audio.play('ui_move'); this.render();
+        });
+        load.append(c);
+      });
+      for (const slot of ['pack', 'quiver', 'armor', 'boots', 'bracer', 'knife'] as GearSlot[]) {
+        const g = GEAR[S.gear[slot]];
+        const c = $(`<button class="cell load ${this.sel === 'g' + slot ? 'sel' : ''} ${g.tier ? '' : 'dim'}">${icon(g.icon, g.color, 44)}</button>`);
+        c.addEventListener('click', () => { this.sel = 'g' + slot; audio.play('ui_move'); this.render(); });
+        load.append(c);
+      }
+      const grid = $('<div class="grid"></div>');
       const keys = Object.keys(S.inv);
       const order = ['goods', 'leather', 'fur', 'hide', 'trophy', 'meat', 'ammo', 'supply'];
       keys.sort((a, b) => order.indexOf(ITEMS[splitKey(a)[0]].cat) - order.indexOf(ITEMS[splitKey(b)[0]].cat));
-      if (!keys.includes(this.sel)) this.sel = keys[0] ?? '';
+      if (!this.sel) this.sel = keys[0] ?? '';
       for (const k of keys) {
-        const [id, q] = splitKey(k);
-        const c = $(`<button class="cell ${k === this.sel ? 'sel' : ''}">${itemIcon(k, 46)}${ITEMS[id].cat === 'hide' ? `<i class="qp q${q}"></i>` : ''}<span class="n">${count(k)}</span></button>`);
+        const [id, q] = splitKey(k), cat = ITEMS[id].cat;
+        const c = $(`<button class="cell ${k === this.sel ? 'sel' : ''}">${itemIcon(k, 46)}${(cat === 'hide' || cat === 'goods') && q !== 1 ? `<i class="qp q${q}"></i>` : ''}<span class="n">${count(k)}</span></button>`);
         c.addEventListener('click', () => { this.sel = k; audio.play('ui_move'); this.render(); });
         grid.append(c);
       }
-      col.append($(`<p style="margin:0 0 10px"><b>Pack weight ${totalWeight()} / ${capacity()}</b> <span class="muted">— ammunition rides in your quiver and weighs nothing.</span></p>`), grid);
-      if (this.sel) {
-        const [id, q] = splitKey(this.sel), it = ITEMS[id];
-        side.innerHTML = `<div style="display:flex;gap:10px;align-items:center">${itemIcon(this.sel, 56)}<h3>${it.name}</h3></div>${it.cat === 'hide' ? `<p>${qTag(q) || '<span class="tag">Good</span>'}</p>` : ''}<p>${it.desc}</p>
-          <div class="kv"><span>Carried</span><span>${count(this.sel)}</span></div><div class="kv"><span>Weight each</span><span>${it.cat === 'ammo' ? '—' : it.weight}</span></div><div class="kv"><span>Worth in ${ZONES[S.zone].town}</span><span>${coin(sellValue(this.sel, S.zone))}</span></div><p></p>`;
+      col.append(load, $(`<h3 class="sec">Pack ${totalWeight()} / ${capacity()}</h3>`), grid);
+      const sel = this.sel;
+      if (sel[0] === 'w' && sel.length === 2) {
+        const w = S.slots[+sel[1]] ? WEAPONS[S.slots[+sel[1]]] : null;
+        side.innerHTML = w ? `<h3>${w.name}</h3><p>${this.weaponStats(w)}</p><p class="muted">${w.desc}</p><p class="muted">Click the slot again to swap weapons.</p>` : '<p class="muted">Empty slot. The fletcher sells weapons.</p>';
+      } else if (sel[0] === 'g' && GEAR[S.gear[sel.slice(1) as GearSlot]]) {
+        const g = GEAR[S.gear[sel.slice(1) as GearSlot]];
+        side.innerHTML = `<h3>${g.name}</h3><p>${g.desc}</p><p class="muted">Craft upgrades at a tanning bench.</p>`;
+      } else if (S.inv[sel]) {
+        const [id] = splitKey(sel), it = ITEMS[id];
+        side.innerHTML = `<div style="display:flex;gap:10px;align-items:center">${itemIcon(sel, 52)}<h3>${it.name}</h3></div><p>${keyTag(sel)}</p><p>${it.desc}</p>
+          <div class="kv"><span>Carried</span><span>${count(sel)}</span></div><div class="kv"><span>Worth here</span><span>${coin(sellValue(sel, S.zone))}</span></div><p></p>`;
         if (id === 'tonic') side.append(this.btn('Drink', () => { G.game.useTonic(); this.render(); }, '', S.hp >= maxHp()));
-        if (it.cat !== 'ammo') side.append(this.btn('Discard 1', () => { addItem(this.sel, -1); this.render(); }, 'red'));
+        if (it.cat !== 'ammo') side.append(this.btn('Discard', () => { addItem(sel, -1); this.render(); }, 'red'));
       } else side.innerHTML = '<p class="muted">Your pack is empty.</p>';
       body.append(side);
-    } else if (this.tab === 'Gear') {
-      col.append($('<h3 class="sec">Weapons — click to equip</h3>'));
-      const owned = [...S.weapons, ...Object.values(WEAPONS).filter((w) => w.kind === 'thrown' && count(w.ammo) > 0).map((w) => w.id)];
-      for (const id of owned) {
-        const w = WEAPONS[id], on = S.slots.includes(id);
-        col.append(this.rowEl(icon(w.kind === 'bow' ? 'bow' : w.kind === 'crossbow' ? 'crossbow' : ITEMS[w.ammo].icon, w.color, 38), w.name, `${this.weaponStats(w)} — ${w.desc}`, on ? '<span class="tag">equipped</span>' : '', [this.btn('Equip', () => { G.game.equipWeapon(id); this.render(); }, 'alt', on)]));
-      }
-      col.append($('<h3 class="sec">Worn gear — craft upgrades at a tanning bench</h3>'));
-      for (const slot of ['pack', 'quiver', 'armor', 'boots', 'bracer', 'knife'] as GearSlot[]) {
-        const g = GEAR[S.gear[slot]];
-        col.append(this.rowEl(icon(g.icon, g.color, 38), g.name, g.desc, `<span class="tag">${slot}</span>`, []));
-      }
     } else if (this.tab === 'Skills') {
-      col.append($(`<p style="margin:0 0 10px"><b>${S.perkPoints}</b> skill point${S.perkPoints === 1 ? '' : 's'} to spend. You earn one each time your Hunter Rank rises.</p>`));
+      col.append($(`<h3 class="sec">${S.perkPoints} skill point${S.perkPoints === 1 ? '' : 's'} · Rank ${S.level} ${RANK_TITLES[S.level]}</h3>`));
       for (const p of PERKS) {
         const n = perk(p.id);
-        const row = $(`<div class="perk"><div class="ic">${icon(p.icon, '#c79a3c', 38)}</div><div class="nm" style="flex:1"><b>${p.name}</b><br><span class="muted">${p.desc(Math.max(1, Math.min(p.max, n + (n < p.max ? 1 : 0))))}</span></div><div class="pips">${Array.from({ length: p.max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div></div>`);
-        row.append(this.btn(n >= p.max ? 'Mastered' : 'Learn', () => { if (canBuyPerk(p.id)) { S.perks[p.id] = n + 1; S.perkPoints--; audio.play('quest'); this.render(); } }, '', !canBuyPerk(p.id)));
+        const row = $(`<div class="perk"><div class="ic">${icon(p.icon, '#c79a3c', 36)}</div><div class="nm" style="flex:1"><b>${p.name}</b><br><span class="muted">${p.desc(Math.max(1, Math.min(p.max, n + (n < p.max ? 1 : 0))))}</span></div><div class="pips">${Array.from({ length: p.max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div></div>`);
+        row.append(this.btn(n >= p.max ? 'Max' : 'Learn', () => { if (canBuyPerk(p.id)) { S.perks[p.id] = n + 1; S.perkPoints--; audio.play('quest'); this.render(); } }, '', !canBuyPerk(p.id)));
         col.append(row);
-      }
-    } else if (this.tab === 'Contracts') {
-      col.append($(`<div class="say"><b>Current objective</b>${G.game.objective()}</div>`));
-      if (!S.contracts.length) col.append($('<p class="muted">No active contracts. Town notice boards post new work every morning.</p>'));
-      for (const c of S.contracts) {
-        const have = c.kind === 'hunt' ? c.have : countItem(c.item, c.minQ);
-        col.append(this.rowEl(c.kind === 'hunt' ? icon('target', '#c8483a', 36) : itemIcon(c.item), c.text, `${c.kind === 'hunt' ? 'Pays on completion' : `Deliver to the notice board in ${ZONES[c.zone].town}`} · ${Math.min(have, c.qty)}/${c.qty}`, `${coin(c.gold)}`, []));
-      }
-      const st = S.stats;
-      col.append($('<h3 class="sec">Record</h3>'), $(`<div><div class="kv"><span>Days in the field</span><span>${S.day}</span></div><div class="kv"><span>Animals taken</span><span>${Object.values(S.kills).reduce((a, b) => a + b, 0)}</span></div><div class="kv"><span>Hides skinned</span><span>${st.skinned}</span></div><div class="kv"><span>Items crafted</span><span>${st.crafted}</span></div><div class="kv"><span>Coin earned</span><span>${st.earned}</span></div><div class="kv"><span>Accuracy</span><span>${st.shots ? Math.round((st.hits / st.shots) * 100) : 0}%</span></div><div class="kv"><span>Legends ended</span><span>${S.legends.length} / 4</span></div></div>`));
-    } else if (this.tab === 'Bestiary') {
-      for (const z of ZONE_ORDER) {
-        col.append($(`<h3 class="sec">${ZONES[z].name}</h3>`));
-        for (const id of [...ZONES[z].spawns.map((s) => s[0]), ZONES[z].legendary]) {
-          const sp = SPECIES[id], k = S.kills[id] ?? 0, known = k > 0 || (zoneIndex(z) <= zoneIndex(S.zone) && !sp.legendary);
-          if (ZONES[z].spawns.findIndex((s) => s[0] === id) !== ZONES[z].spawns.map((s) => s[0]).indexOf(id)) continue;
-          col.append(this.rowEl(icon(sp.legendary ? 'skull' : 'paw', sp.legendary ? '#a050d0' : ITEMS[sp.hide].color, 36), known || sp.legendary ? sp.name : '???', known ? `${sp.blurb} Health ${sp.hp} · ${sp.behaviour === 'predator' || sp.behaviour === 'boss' ? 'Aggressive' : sp.behaviour === 'defensive' ? 'Charges if provoked' : 'Flees'}` : sp.legendary ? 'Legendary beast. Few have seen it and returned.' : 'Not yet encountered.', `${k} taken`, []));
-        }
       }
     } else {
       col.style.display = 'flex'; col.style.gap = '18px';
@@ -540,17 +577,21 @@ export class UI {
       col.append(wrap);
       this.drawMini((wrap.firstElementChild as HTMLCanvasElement).getContext('2d')!, 940, 0, false);
       const z = G.zone.def;
-      col.append($(`<div class="detail" style="flex:1"><h3>${z.name}</h3><p><i>${z.subtitle}</i></p>
-        <div class="kv"><span>${icon('map', '#ffe070', 18)} Town</span><span>${z.town}</span></div><div class="kv"><span>Game</span><span style="text-align:right;max-width:200px">${[...new Set(z.spawns.map((s) => SPECIES[s[0]].name))].join(', ')}</span></div>
-        <h3 class="sec" style="margin-top:14px">Legend</h3><p><span style="color:#d8a800">●</span> Town &nbsp; <span style="color:#ff9a40">●</span> Camp &nbsp; <span style="color:#e86a5a">●</span> Unskinned kill &nbsp; <span style="color:#b050e0">●</span> Legendary lair</p>
-        <h3 class="sec">Regions</h3>${ZONE_ORDER.map((id) => `<div class="kv"><span>${ZONES[id].name}</span><span>${S.level >= ZONES[id].rank ? (S.legends.includes(ZONES[id].legendary) ? '★ legend ended' : 'open') : `Rank ${ZONES[id].rank}`}</span></div>`).join('')}</div>`));
+      const side = $(`<div class="detail" style="flex:1;overflow:auto"><h3>${z.name}</h3><p class="muted" style="margin:2px 0 8px">${G.game.objective()}</p></div>`);
+      if (S.contracts.length) side.append($('<h3 class="sec">Contracts</h3>'));
+      for (const c of S.contracts) { const have = c.kind === 'hunt' ? c.have : countItem(c.item, c.minQ); side.append($(`<div class="kv"><span>${c.text}</span><span>${Math.min(have, c.qty)}/${c.qty}</span></div>`)); }
+      side.append($('<h3 class="sec">Game here</h3>'));
+      for (const id of [...new Set(z.spawns.map((s) => s[0])), z.legendary]) { const sp = SPECIES[id]; side.append($(`<div class="kv"><span>${sp.legendary ? '★ ' : ''}${sp.name}</span><span>${S.kills[id] ?? 0} taken</span></div>`)); }
+      side.append($('<h3 class="sec">Regions</h3>'));
+      for (const id of ZONE_ORDER) side.append($(`<div class="kv"><span>${ZONES[id].name}</span><span>${S.level >= ZONES[id].rank ? (S.legends.includes(ZONES[id].legendary) ? '★' : 'open') : `Rank ${ZONES[id].rank}`}</span></div>`));
+      col.append(side);
     }
   }
 
   private renderPause() {
     const { body } = this.frame('Paused', [], true);
     const st = $('<div class="stack" style="flex:1;align-items:center"></div>');
-    st.append(this.btn('Resume', () => this.close(), 'big'), this.btn('Journal', () => this.open('journal'), 'big alt'), this.btn('Options', () => this.open('options'), 'big alt'), this.btn('Controls', () => this.open('controls'), 'big alt'),
+    st.append(this.btn('Resume', () => this.close(), 'big'), this.btn('Options', () => this.open('options'), 'big alt'), this.btn('Controls', () => this.open('controls'), 'big alt'),
       this.btn('Save & Quit to Title', () => { G.game.save(true); location.reload(); }, 'big red'));
     body.append(st);
   }
@@ -573,14 +614,14 @@ export class UI {
   private renderControls() {
     const { body } = this.frame('Controls', [], true);
     const rows: [string, string, string][] = [['W A S D', 'Left stick', 'Move'], ['Mouse', 'Right stick', 'Look'], ['Shift', 'L3 / B', 'Sprint'], ['C', 'R3', 'Crouch / sneak'], ['Space', 'A', 'Jump'],
-      ['Right mouse', 'LT', 'Aim'], ['Left mouse', 'RT', 'Draw & loose / fire / throw'], ['1 2 3 · wheel', 'LB / RB', 'Bow · crossbow · thrown'], ['R', '—', 'Span crossbow'], ['E', 'X', 'Interact / skin'], ['H', 'D-pad up', 'Drink tonic'], ['Tab', 'Back', 'Journal'], ['Esc', 'Start', 'Pause']];
+      ['Right mouse', 'LT', 'Aim'], ['Left mouse', 'RT', 'Draw & loose / fire / throw'], ['1 2 3 · wheel', 'LB / RB', 'Bow · crossbow · thrown'], ['R', '—', 'Span crossbow'], ['F', 'Y', 'Knife slash'], ['E', 'X', 'Interact / skin'], ['H', 'D-pad up', 'Drink tonic'], ['Tab', 'Back', 'Journal'], ['Esc', 'Start', 'Pause']];
     body.append($(`<div class="col"><div class="keys" style="grid-template-columns:auto auto 1fr"><b>Keyboard</b><b>Gamepad</b><b></b>${rows.map(([k, g, d]) => `<kbd>${k}</kbd><kbd>${g}</kbd><span>${d}</span>`).join('')}</div></div>`));
   }
 
   // ---------- menu navigation (keyboard / gamepad) ----------
   nav() {
     const rootEl = this.panel ?? this.titleEl ?? this.overlay;
-    if (!rootEl) return;
+    if (!rootEl || this.mg) return;
     const btns = [...rootEl.querySelectorAll('button:not(:disabled)')] as HTMLElement[];
     if (!btns.length) return;
     const dx = (input.uiRight() ? 1 : 0) - (input.uiLeft() ? 1 : 0), dy = (input.uiDown() ? 1 : 0) - (input.uiUp() ? 1 : 0);

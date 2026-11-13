@@ -3,6 +3,8 @@
 export type Quality = 0 | 1 | 2; // Poor, Good, Pristine
 export const QUALITY_NAMES = ['Poor', 'Good', 'Pristine'] as const;
 export const QUALITY_MULT = [0.55, 1, 1.7] as const;
+export const GOODS_QUALITY = ['Rough', '', 'Fine'] as const;
+export const GOODS_MULT = [0.75, 1, 1.35] as const;
 
 export type Behaviour = 'prey' | 'skittish' | 'defensive' | 'predator' | 'boss';
 
@@ -227,21 +229,22 @@ item('bolt', 'Bolt', 'ammo', 2, 0.08, 'bolt', '#b8b8c0', 'A short, heavy crossbo
 item('knife', 'Throwing Knife', 'ammo', 4, 0.2, 'knife', '#c8d0d8', 'Balanced for the throw. Quiet and quick.', 9);
 item('tomahawk', 'Tomahawk', 'ammo', 10, 0.6, 'axe', '#a8b0b8', 'A hatchet weighted to bite deep.', 24, 1);
 item('javelin', 'Javelin', 'ammo', 18, 1, 'spear', '#c8b088', 'A long throwing spear for big game.', 42, 2);
-item('salt', 'Tanning Salts', 'supply', 3, 0.2, 'salt', '#f0f0f0', 'Needed to tan any hide.', 6);
+item('salt', 'Tanning Salts', 'supply', 3, 0.2, 'salt', '#f0f0f0', 'Tans one hide.', 6);
+item('bark', 'Oak-bark Liquor', 'supply', 7, 0.3, 'tonic', '#8a5a2a', 'A slow, rich tan: one extra leather per hide.', 16);
 item('thread', 'Waxed Thread', 'supply', 2, 0.05, 'thread', '#e8d090', 'Holds leatherwork together.', 5);
 item('rivets', 'Brass Rivets', 'supply', 6, 0.1, 'rivet', '#e0b040', 'For work that has to last.', 14, 1);
 item('tonic', 'Hunter’s Tonic', 'supply', 12, 0.3, 'tonic', '#e05858', 'Restores 60 health. Tastes like regret.', 30);
 // Trade goods (crafted, for sale)
-item('g_pouch', 'Coin Pouch', 'goods', 78, 0.3, 'pouch', '#d2a56b', 'Every town needs these.');
-item('g_gloves', 'Kid Gloves', 'goods', 118, 0.3, 'glove', '#d2a56b', 'Fine light-leather gloves.');
+item('g_pouch', 'Coin Pouch', 'goods', 95, 0.3, 'pouch', '#d2a56b', 'Every town needs these.');
+item('g_gloves', 'Kid Gloves', 'goods', 135, 0.3, 'glove', '#d2a56b', 'Fine light-leather gloves.');
 item('g_hat', 'Fur Hat', 'goods', 132, 0.4, 'hat', '#e8a868', 'Warm, and briefly fashionable everywhere.');
 item('g_belt', 'Tooled Belt', 'goods', 150, 0.5, 'belt', '#99643a', 'Sturdy leather with a brass buckle.');
-item('g_boots', 'Riding Boots', 'goods', 265, 1.2, 'boot', '#99643a', 'Cut for the stirrup. Always in demand.');
+item('g_boots', 'Riding Boots', 'goods', 300, 1.2, 'boot', '#99643a', 'Cut for the stirrup. Always in demand.');
 item('g_satchel', 'Courier Satchel', 'goods', 330, 1, 'bag', '#99643a', 'Stitched double and riveted.');
 item('g_cloak', 'Fur Cloak', 'goods', 520, 2, 'cloak', '#aab2bb', 'Thick-fur cloak with a soft lining.');
 item('g_saddle', 'Steppe Saddle', 'goods', 940, 6, 'saddle', '#5a3a26', 'Heavy-leather saddle. A season’s wages for a rider.');
 item('g_drum', 'War Drum', 'goods', 700, 4, 'drum', '#5a3a26', 'Stretched heavy hide over a horn-pegged frame.');
-item('g_mantle', 'Royal Mantle', 'goods', 1500, 3, 'cloak', '#f4fbff', 'Fit for a throne room. Almost a shame to sell.');
+item('g_mantle', 'Royal Mantle', 'goods', 1400, 3, 'cloak', '#f4fbff', 'Fit for a throne room. Almost a shame to sell.');
 export const ITEMS = I;
 
 // Tanning: hide -> material, base yield at Good quality
@@ -284,18 +287,18 @@ export interface WeaponDef {
   id: string; name: string; kind: WeaponKind; tier: number; damage: number; speed: number; // projectile m/s
   time: number; // draw / reload / wind-up seconds
   ammo: string; model: string; price: number; zone: number; // sold from zone index
-  desc: string; color: string; craft?: [string, number][]; modelScale?: number;
+  desc: string; color: string; modelScale?: number;
 }
 export const WEAPONS: Record<string, WeaponDef> = {
   bow1: { id: 'bow1', name: 'Ash Shortbow', kind: 'bow', tier: 1, damage: 24, speed: 52, time: 0.8, ammo: 'arrow', model: 'bow_withString', price: 0, zone: 0, desc: 'Your father’s bow. Light draw, short reach.', color: '#c8a070' },
   bow2: { id: 'bow2', name: "Hunter's Recurve", kind: 'bow', tier: 2, damage: 38, speed: 62, time: 0.85, ammo: 'arrow', model: 'bow_A_withString', price: 160, zone: 0, desc: 'A proper working bow.', color: '#b08050' },
   bow3: { id: 'bow3', name: 'Yew Longbow', kind: 'bow', tier: 3, damage: 58, speed: 74, time: 1.0, ammo: 'arrow', model: 'bow_B_withString', price: 620, zone: 1, desc: 'Long reach and a heavy hit.', color: '#8a6038' },
   bow4: { id: 'bow4', name: 'Horn Composite Bow', kind: 'bow', tier: 4, damage: 84, speed: 86, time: 1.0, ammo: 'arrow', model: 'bow_C_withString', price: 1900, zone: 2, desc: 'Steppe-made. Punches far above its size.', color: '#e0c890' },
-  bow5: { id: 'bow5', name: "Monarch's Antler Bow", kind: 'bow', tier: 5, damage: 120, speed: 96, time: 0.9, ammo: 'arrow', model: 'bow_C_withString', price: 0, zone: 9, desc: 'Strung with gold-flecked sinew. There is no finer bow.', color: '#ffd866', craft: [['antler_monarch', 1], ['horn', 4], ['sinew', 6], ['leather_heavy', 2]] },
+  bow5: { id: 'bow5', name: "Monarch's Antler Bow", kind: 'bow', tier: 5, damage: 120, speed: 96, time: 0.9, ammo: 'arrow', model: 'bow_C_withString', price: 0, zone: 9, desc: 'Strung with gold-flecked sinew. There is no finer bow.', color: '#ffd866' },
   xbow1: { id: 'xbow1', name: 'Light Crossbow', kind: 'crossbow', tier: 1, damage: 52, speed: 80, time: 2.3, ammo: 'bolt', model: 'crossbow_1handed', price: 280, zone: 0, desc: 'Flat, hard-hitting and slow to span.', color: '#a08060', modelScale: 1.25 },
   xbow2: { id: 'xbow2', name: 'Heavy Crossbow', kind: 'crossbow', tier: 2, damage: 96, speed: 95, time: 2.9, ammo: 'bolt', model: 'crossbow_2handed', price: 1100, zone: 1, desc: 'Drops a stag where it stands.', color: '#806040' },
   xbow3: { id: 'xbow3', name: 'Siege Arbalest', kind: 'crossbow', tier: 3, damage: 165, speed: 110, time: 3.5, ammo: 'bolt', model: 'crossbow_2handed', price: 3200, zone: 2, desc: 'Steel prod, windlass, and no mercy.', color: '#6a7078', modelScale: 1.2 },
-  xbow4: { id: 'xbow4', name: 'Ironhorn Arbalest', kind: 'crossbow', tier: 4, damage: 240, speed: 120, time: 3.2, ammo: 'bolt', model: 'crossbow_2handed', price: 0, zone: 9, desc: 'The prod is a single grey horn. It hums when spanned.', color: '#b8bcc4', craft: [['horn_ironhorn', 1], ['leather_heavy', 4], ['rivets', 10]], modelScale: 1.25 },
+  xbow4: { id: 'xbow4', name: 'Ironhorn Arbalest', kind: 'crossbow', tier: 4, damage: 240, speed: 120, time: 3.2, ammo: 'bolt', model: 'crossbow_2handed', price: 0, zone: 9, desc: 'The prod is a single grey horn. It hums when spanned.', color: '#b8bcc4', modelScale: 1.25 },
   thr1: { id: 'thr1', name: 'Throwing Knives', kind: 'thrown', tier: 1, damage: 18, speed: 30, time: 0.3, ammo: 'knife', model: 'dagger', price: 0, zone: 0, desc: 'Silent. Triple damage on unaware prey.', color: '#c8d0d8' },
   thr2: { id: 'thr2', name: 'Tomahawks', kind: 'thrown', tier: 2, damage: 46, speed: 28, time: 0.42, ammo: 'tomahawk', model: 'axe_1handed', price: 0, zone: 1, desc: 'Heavy, spinning, decisive.', color: '#a8b0b8' },
   thr3: { id: 'thr3', name: 'Javelins', kind: 'thrown', tier: 3, damage: 92, speed: 34, time: 0.55, ammo: 'javelin', model: 'spear_A', price: 0, zone: 2, desc: 'For game that does not notice knives.', color: '#c8b088' },
@@ -305,36 +308,62 @@ export const THROWN_BY_AMMO: Record<string, string> = { knife: 'thr1', tomahawk:
 
 export interface RecipeDef {
   id: string; name: string; section: 'Trade Goods' | 'Gear' | 'Weapons';
-  out: { item?: string; gear?: string; weapon?: string; qty?: number };
-  needs: [string, number][]; rank: number; xp: number;
+  out: { item?: string; gear?: string; weapon?: string };
+  pattern: string[]; // rows of the 3x3 bench grid, one letter per cell ('.' or ' ' = empty)
+  needs: [string, number][]; rank: number; xp: number; key: string;
+}
+/** Letters used in bench patterns. */
+export const MAT_KEYS: Record<string, string> = {
+  L: 'leather_light', S: 'leather_sturdy', H: 'leather_heavy', f: 'fur_soft', F: 'fur_thick', t: 'thread', r: 'rivets', s: 'sinew',
+  a: 'antler', n: 'fang', h: 'horn', M: 'antler_monarch', I: 'horn_ironhorn',
+};
+/** Canonical form of a grid so a pattern matches wherever it is placed. */
+export function gridKey(cells: string[]): string {
+  let r0 = 3, r1 = -1, c0 = 3, c1 = -1;
+  for (let i = 0; i < 9; i++) if (cells[i]) { const r = Math.floor(i / 3), c = i % 3; r0 = Math.min(r0, r); r1 = Math.max(r1, r); c0 = Math.min(c0, c); c1 = Math.max(c1, c); }
+  if (r1 < 0) return '';
+  const rows: string[] = [];
+  for (let r = r0; r <= r1; r++) { let row = ''; for (let c = c0; c <= c1; c++) row += (cells[r * 3 + c] || '.') + ','; rows.push(row); }
+  return rows.join('/');
+}
+export function patternCells(pattern: string[]): string[] {
+  const cells = Array<string>(9).fill('');
+  pattern.forEach((row, r) => { for (let c = 0; c < 3; c++) { const ch = row[c]; if (ch && ch !== '.' && ch !== ' ') cells[r * 3 + c] = MAT_KEYS[ch]; } });
+  return cells;
+}
+function recipe(id: string, name: string, section: RecipeDef['section'], out: RecipeDef['out'], rank: number, xp: number, pattern: string[]): RecipeDef {
+  const cells = patternCells(pattern);
+  const cnt: Record<string, number> = {};
+  for (const c of cells) if (c) cnt[c] = (cnt[c] ?? 0) + 1;
+  return { id, name, section, out, pattern, rank, xp, needs: Object.entries(cnt), key: gridKey(cells) };
 }
 export const RECIPES: RecipeDef[] = [
-  { id: 'r_pouch', name: 'Coin Pouch', section: 'Trade Goods', out: { item: 'g_pouch' }, needs: [['leather_light', 2], ['thread', 1]], rank: 1, xp: 10 },
-  { id: 'r_gloves', name: 'Kid Gloves', section: 'Trade Goods', out: { item: 'g_gloves' }, needs: [['leather_light', 3], ['thread', 2]], rank: 2, xp: 16 },
-  { id: 'r_hat', name: 'Fur Hat', section: 'Trade Goods', out: { item: 'g_hat' }, needs: [['fur_soft', 2], ['leather_light', 1], ['thread', 1]], rank: 2, xp: 18 },
-  { id: 'r_belt', name: 'Tooled Belt', section: 'Trade Goods', out: { item: 'g_belt' }, needs: [['leather_sturdy', 2], ['rivets', 1]], rank: 4, xp: 24 },
-  { id: 'r_boots', name: 'Riding Boots', section: 'Trade Goods', out: { item: 'g_boots' }, needs: [['leather_sturdy', 3], ['sinew', 2], ['thread', 2]], rank: 5, xp: 34 },
-  { id: 'r_satchel', name: 'Courier Satchel', section: 'Trade Goods', out: { item: 'g_satchel' }, needs: [['leather_sturdy', 4], ['rivets', 2], ['thread', 2]], rank: 6, xp: 44 },
-  { id: 'r_cloak', name: 'Fur Cloak', section: 'Trade Goods', out: { item: 'g_cloak' }, needs: [['fur_thick', 4], ['fur_soft', 2], ['thread', 3]], rank: 7, xp: 60 },
-  { id: 'r_drum', name: 'War Drum', section: 'Trade Goods', out: { item: 'g_drum' }, needs: [['leather_heavy', 3], ['horn', 2], ['sinew', 4]], rank: 9, xp: 80 },
-  { id: 'r_saddle', name: 'Steppe Saddle', section: 'Trade Goods', out: { item: 'g_saddle' }, needs: [['leather_heavy', 5], ['leather_sturdy', 2], ['rivets', 4]], rank: 10, xp: 100 },
-  { id: 'r_mantle', name: 'Royal Mantle', section: 'Trade Goods', out: { item: 'g_mantle' }, needs: [['fur_thick', 6], ['fur_soft', 6], ['fang', 6], ['thread', 6]], rank: 13, xp: 160 },
-  { id: 'r_pack1', name: 'Hide Satchel', section: 'Gear', out: { gear: 'pack1' }, needs: [['leather_light', 4], ['thread', 2]], rank: 1, xp: 30 },
-  { id: 'r_quiver1', name: 'Leather Quiver', section: 'Gear', out: { gear: 'quiver1' }, needs: [['leather_light', 3], ['sinew', 1]], rank: 2, xp: 30 },
-  { id: 'r_knife1', name: 'Skinning Knife', section: 'Gear', out: { gear: 'knife1' }, needs: [['antler', 1], ['leather_light', 1], ['sinew', 1]], rank: 3, xp: 40 },
-  { id: 'r_boots1', name: 'Soft-sole Boots', section: 'Gear', out: { gear: 'boots1' }, needs: [['leather_light', 3], ['fur_soft', 2], ['thread', 2]], rank: 3, xp: 40 },
-  { id: 'r_bracer1', name: "Archer's Bracer", section: 'Gear', out: { gear: 'bracer1' }, needs: [['leather_sturdy', 2], ['sinew', 2]], rank: 4, xp: 45 },
-  { id: 'r_armor1', name: 'Leather Jerkin', section: 'Gear', out: { gear: 'armor1' }, needs: [['leather_sturdy', 4], ['leather_light', 2], ['thread', 3]], rank: 4, xp: 60 },
-  { id: 'r_pack2', name: "Trapper's Pack", section: 'Gear', out: { gear: 'pack2' }, needs: [['leather_sturdy', 5], ['rivets', 3], ['thread', 3]], rank: 6, xp: 70 },
-  { id: 'r_quiver2', name: 'Wolfhide Quiver', section: 'Gear', out: { gear: 'quiver2' }, needs: [['fur_thick', 2], ['leather_sturdy', 2], ['fang', 2]], rank: 7, xp: 70 },
-  { id: 'r_armor2', name: 'Studded Hide', section: 'Gear', out: { gear: 'armor2' }, needs: [['leather_heavy', 3], ['leather_sturdy', 3], ['rivets', 6]], rank: 8, xp: 110 },
-  { id: 'r_boots2', name: 'Stalker Boots', section: 'Gear', out: { gear: 'boots2' }, needs: [['leather_sturdy', 3], ['fur_thick', 2], ['sinew', 3]], rank: 8, xp: 90 },
-  { id: 'r_knife2', name: 'Antler-grip Flenser', section: 'Gear', out: { gear: 'knife2' }, needs: [['antler', 3], ['horn', 1], ['leather_sturdy', 1]], rank: 9, xp: 100 },
-  { id: 'r_bracer2', name: 'Sinew-bound Bracer', section: 'Gear', out: { gear: 'bracer2' }, needs: [['leather_heavy', 2], ['sinew', 6], ['fang', 2]], rank: 10, xp: 110 },
-  { id: 'r_pack3', name: 'Expedition Frame', section: 'Gear', out: { gear: 'pack3' }, needs: [['leather_heavy', 5], ['antler', 2], ['rivets', 6]], rank: 11, xp: 150 },
-  { id: 'r_armor3', name: 'Frostfur Harness', section: 'Gear', out: { gear: 'armor3' }, needs: [['leather_heavy', 5], ['fur_thick', 5], ['rivets', 8]], rank: 13, xp: 200 },
-  { id: 'r_bow5', name: "Monarch's Antler Bow", section: 'Weapons', out: { weapon: 'bow5' }, needs: WEAPONS.bow5.craft!, rank: 8, xp: 300 },
-  { id: 'r_xbow4', name: 'Ironhorn Arbalest', section: 'Weapons', out: { weapon: 'xbow4' }, needs: WEAPONS.xbow4.craft!, rank: 11, xp: 400 },
+  recipe('r_pouch', 'Coin Pouch', 'Trade Goods', { item: 'g_pouch' }, 1, 10, ['.t.', 'L.L', '.L.']),
+  recipe('r_gloves', 'Kid Gloves', 'Trade Goods', { item: 'g_gloves' }, 2, 16, ['L.L', 'LtL']),
+  recipe('r_hat', 'Fur Hat', 'Trade Goods', { item: 'g_hat' }, 2, 18, ['ftf', '.L.']),
+  recipe('r_belt', 'Tooled Belt', 'Trade Goods', { item: 'g_belt' }, 4, 24, ['SSr']),
+  recipe('r_boots', 'Riding Boots', 'Trade Goods', { item: 'g_boots' }, 5, 34, ['S..', 'Ss.', 'SSt']),
+  recipe('r_satchel', 'Courier Satchel', 'Trade Goods', { item: 'g_satchel' }, 6, 44, ['rSr', 'StS', '.S.']),
+  recipe('r_cloak', 'Fur Cloak', 'Trade Goods', { item: 'g_cloak' }, 7, 60, ['FtF', 'FfF', '.f.']),
+  recipe('r_drum', 'War Drum', 'Trade Goods', { item: 'g_drum' }, 9, 80, ['sHs', 'hHh', '.H.']),
+  recipe('r_saddle', 'Steppe Saddle', 'Trade Goods', { item: 'g_saddle' }, 10, 100, ['rHr', 'HHH', 'SrS']),
+  recipe('r_mantle', 'Royal Mantle', 'Trade Goods', { item: 'g_mantle' }, 13, 160, ['nfn', 'FFF', 'FtF']),
+  recipe('r_pack1', 'Hide Satchel', 'Gear', { gear: 'pack1' }, 1, 30, ['LtL', 'LLL']),
+  recipe('r_quiver1', 'Leather Quiver', 'Gear', { gear: 'quiver1' }, 2, 30, ['Ls', 'L.', 'LL']),
+  recipe('r_knife1', 'Skinning Knife', 'Gear', { gear: 'knife1' }, 3, 40, ['a', 's', 'L']),
+  recipe('r_boots1', 'Soft-sole Boots', 'Gear', { gear: 'boots1' }, 3, 40, ['f..', 'Lf.', 'LLt']),
+  recipe('r_bracer1', "Archer's Bracer", 'Gear', { gear: 'bracer1' }, 4, 45, ['sSs', '.S.']),
+  recipe('r_armor1', 'Leather Jerkin', 'Gear', { gear: 'armor1' }, 4, 60, ['S.S', 'SLS', 'LtL']),
+  recipe('r_pack2', "Trapper's Pack", 'Gear', { gear: 'pack2' }, 6, 70, ['rSr', 'SSS', 'StS']),
+  recipe('r_quiver2', 'Wolfhide Quiver', 'Gear', { gear: 'quiver2' }, 7, 70, ['Fn.', 'S..', 'SFn']),
+  recipe('r_armor2', 'Studded Hide', 'Gear', { gear: 'armor2' }, 8, 110, ['H.H', 'rHr', 'SrS']),
+  recipe('r_boots2', 'Stalker Boots', 'Gear', { gear: 'boots2' }, 8, 90, ['F..', 'SF.', 'SSs']),
+  recipe('r_knife2', 'Antler-grip Flenser', 'Gear', { gear: 'knife2' }, 9, 100, ['a.', 'as', 'hS']),
+  recipe('r_bracer2', 'Sinew-bound Bracer', 'Gear', { gear: 'bracer2' }, 10, 110, ['sHs', 'nHn', '.s.']),
+  recipe('r_pack3', 'Expedition Frame', 'Gear', { gear: 'pack3' }, 11, 150, ['aHa', 'HHH', 'rHr']),
+  recipe('r_armor3', 'Frostfur Harness', 'Gear', { gear: 'armor3' }, 13, 200, ['F.F', 'HFH', 'HrH']),
+  recipe('r_bow5', "Monarch's Antler Bow", 'Weapons', { weapon: 'bow5' }, 8, 300, ['.hs', 'MHs', '.hs']),
+  recipe('r_xbow4', 'Ironhorn Arbalest', 'Weapons', { weapon: 'xbow4' }, 11, 400, ['rIr', '.H.', '.H.']),
 ];
 
 export interface PerkDef { id: string; name: string; max: number; desc: (n: number) => string; icon: string }
@@ -369,5 +398,7 @@ export const TIPS = [
   'Retrieve your arrows from the ground and from your kills.',
   'Legendary beasts leave signs. Check the notice board for rumours.',
   'Roast game meat at any campfire to restore health in the field.',
+  'Press F to slash with your knife. It staggers anything that gets too close.',
+  'Nail the timing at the tanning bench for extra leather, and at the stitching for Fine goods.',
   'A heavier pack lets you stay out longer. Craft one at the tanner’s bench.',
 ];

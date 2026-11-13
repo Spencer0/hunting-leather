@@ -116,7 +116,7 @@ export function uniqueMaterials(obj: THREE.Object3D) {
 export const MODEL_MANIFEST = {
   animals: ['Deer', 'Stag', 'Fox', 'Wolf', 'Bull', 'Cow', 'Alpaca', 'Husky', 'Yeti_glTF'].map((n) => 'animals/' + n),
   chars: ['Ranger', 'Barbarian', 'Mage', 'Rogue', 'Rogue_Hooded', 'Knight', 'Druid', 'Engineer'].map((n) => 'chars/' + n),
-  anims: ['General', 'MovementBasic', 'MovementAdvanced', 'CombatRanged', 'Simulation', 'Tools'].map((n) => 'anims/' + n),
+  anims: ['General', 'MovementBasic', 'MovementAdvanced', 'CombatRanged', 'CombatMelee', 'Tools'].map((n) => 'anims/' + n),
   weapons: ['bow_withString', 'bow_A_withString', 'bow_B_withString', 'bow_C_withString', 'crossbow_1handed', 'crossbow_2handed', 'arrow_bow', 'arrow_crossbow', 'dagger', 'axe_1handed', 'spear_A', 'quiver'].map((n) => 'weapons/' + n),
   nature: [
     'CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_4', 'CommonTree_5', 'Pine_1', 'Pine_2', 'Pine_3', 'Pine_4', 'Pine_5',

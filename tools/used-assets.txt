@@ -233,3 +233,4 @@ weapons/crossbow_2handed.glb
 weapons/dagger.glb
 weapons/quiver.glb
 weapons/spear_A.glb
+anims/CombatMelee.glb
