@@ -21,6 +21,8 @@ export interface Save {
   time: number; // hours 0..24
   day: number;
   kills: Record<string, number>;
+  fish?: Record<string, number>;
+  bounty?: Record<string, number>;
   legends: string[];
   contracts: Contract[]; contractSeq: number; boardDay: Record<string, number>;
   board: Record<string, Contract[]>;

@@ -3,10 +3,11 @@ import * as THREE from 'three';
 import { Animal, type HitInfo } from './animals';
 import { audio, type Mood } from './audio';
 import { G } from './ctx';
-import { GEAR, GOODS_QUALITY, ITEMS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
+import { FISH, GEAR, GOODS_QUALITY, ITEMS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
 import { input, rumble } from './input';
 import type { Shot } from './projectiles';
 import { S, addItem, addXp, ammoCap, buyPrice, capacity, count, countItem, invKey, maxHp, perk, removeAny, removeItem, sellValue, settings, skinBonus, splitKey, totalWeight, writeSave, zoneIndex, type Contract } from './state';
+import { WATER_Y } from './terrain';
 import { pick } from './util';
 import { Zone, type Station } from './world';
 
@@ -204,9 +205,10 @@ export class Game {
   }
 
   // ---------- trade ----------
-  shopStock(kind: 'merchant' | 'fletcher'): string[] {
+  shopStock(kind: 'merchant' | 'fletcher' | 'fishmonger'): string[] {
+    if (kind === 'fishmonger') return ['rod', 'bait'];
     const zi = zoneIndex(S.zone);
-    const ids = kind === 'merchant' ? ['salt', 'bark', 'thread', 'rivets', 'tonic'] : ['arrow', 'bolt', 'knife', 'tomahawk', 'javelin'];
+    const ids = kind === 'merchant' ? ['salt', 'bark', 'thread', 'rivets', 'tonic', 'rod', 'bait'] : ['arrow', 'bolt', 'knife', 'tomahawk', 'javelin'];
     return ids.filter((id) => (ITEMS[id].minZone ?? 0) <= zi);
   }
   weaponStock(): string[] {
@@ -215,6 +217,8 @@ export class Game {
   }
   buy(id: string, n: number): boolean {
     const it = ITEMS[id];
+    if (id === 'rod' && count('rod') > 0) { G.ui.toast('You already have a pole', 'warn'); audio.play('error'); return false; }
+    if (id === 'rod') n = 1;
     if ((id === 'arrow' || id === 'bolt') && count(id) + n > ammoCap()) n = ammoCap() - count(id);
     if (n <= 0) { G.ui.toast('Your quiver is full', 'warn'); audio.play('error'); return false; }
     const cost = buyPrice(id) * n;
@@ -245,16 +249,32 @@ export class Game {
     if (w.kind === 'crossbow') S.flags['xl_' + id] = S.flags['xl_' + id] ?? true;
     audio.play('equip');
   }
-  sell(key: string, n: number) {
+  sell(key: string, n: number, mult = 1) {
     n = Math.min(n, count(key));
     if (n <= 0) return;
-    const v = sellValue(key, S.zone) * n;
+    const v = Math.round(sellValue(key, S.zone) * mult) * n;
     addItem(key, -n);
     S.gold += v;
     S.stats.earned += v;
     const [id] = splitKey(key);
     if (ITEMS[id].cat === 'goods') { S.flags.sold = true; this.gainXp(Math.round(v * 0.04)); }
     audio.play('coins');
+  }
+
+  /** Huntmaster's standing bounty on the region's predators: [species, unclaimed kills, coin each]. */
+  bounties(): [string, number, number][] {
+    const ids = [...new Set(G.zone.def.spawns.map((s) => s[0]))].filter((id) => SPECIES[id].behaviour === 'predator');
+    return ids.map((id) => [id, (S.kills[id] ?? 0) - (S.bounty?.[id] ?? 0), Math.round(SPECIES[id].xp * 0.6)]);
+  }
+  claimBounties() {
+    let total = 0;
+    S.bounty = S.bounty ?? {};
+    for (const [id, n, each] of this.bounties()) { total += n * each; S.bounty[id] = S.kills[id] ?? 0; }
+    if (!total) return;
+    S.gold += total; S.stats.earned += total;
+    audio.play('quest');
+    G.ui.toast(`Bounty paid: +${total} coin`, 'rare', 'coin');
+    this.gainXp(Math.round(total * 0.15));
   }
 
   // ---------- crafting ----------
@@ -345,6 +365,58 @@ export class Game {
     S.hp = Math.min(maxHp(), S.hp + 14 * n);
     audio.play('pickup');
     G.ui.toast(`Roasted ${n} meat (+${14 * n} health)`, 'good', 'meat');
+  }
+
+  cheapestFish(): string | null {
+    let best: string | null = null;
+    for (const k in S.inv) if (ITEMS[k]?.cat === 'fish' && (!best || ITEMS[k].value < ITEMS[best].value)) best = k;
+    return best;
+  }
+  cookFish() {
+    const k = this.cheapestFish();
+    if (!k) return;
+    addItem(k, -1);
+    S.hp = Math.min(maxHp(), S.hp + 24);
+    audio.play('pickup');
+    G.ui.toast(`Grilled ${ITEMS[k].name} (+24 health)`, 'good', k);
+  }
+
+  // ---------- fishing ----------
+  /** A point on open water a short cast ahead of the hunter, or null if not at a shore. */
+  private castPoint(): THREE.Vector3 | null {
+    const p = G.player, t = G.zone.terrain;
+    if (!p.grounded || WATER_Y - t.height(p.pos.x, p.pos.z) > 0.5) return null;
+    const fx = -Math.sin(p.camYaw), fz = -Math.cos(p.camYaw);
+    for (const d of [2.5, 4, 5.5, 7, 8.5, 10]) {
+      const x = p.pos.x + fx * d, z = p.pos.z + fz * d;
+      if (WATER_Y - t.height(x, z) > 0.18) {
+        const far = WATER_Y - t.height(x + fx * 2.5, z + fz * 2.5) > 0.18 ? 2.5 : 0.6;
+        return new THREE.Vector3(x + fx * far, WATER_Y, z + fz * far);
+      }
+    }
+    return null;
+  }
+  private fish(at: THREE.Vector3) {
+    const p = G.player;
+    if (!removeItem('bait', 1)) { G.ui.toast('No bait — merchants sell it', 'warn', 'bait'); audio.play('error'); return; }
+    p.yaw = Math.atan2(at.x - p.pos.x, at.z - p.pos.z);
+    p.crouching = false;
+    p.cine = { angle: p.yaw + 2.5, anim: 'Fishing_Cast', dist: 4.6, bobber: at };
+    G.ui.startFishing({
+      fish: FISH[S.zone], luck: Math.min(1, S.level / 14),
+      onPhase: (anim) => { if (p.cine) p.cine.anim = anim; },
+      onDone: (r) => {
+        p.cine = null;
+        if (!r.fish) return;
+        const it = ITEMS[r.fish];
+        addItem(r.fish, 1);
+        S.fish = S.fish ?? {};
+        S.fish[r.fish] = (S.fish[r.fish] ?? 0) + 1;
+        G.ui.toast(`${it.name} · ${r.weight} lb`, it.value > 100 ? 'rare' : 'item', r.fish);
+        if (r.perfect && Math.random() < 0.5) { addItem('bait', 1); G.ui.toast('Clean catch — bait saved', 'good', 'bait'); }
+        this.gainXp(Math.round(6 + it.value * 0.18));
+      },
+    });
   }
 
   // ---------- rest ----------
@@ -447,8 +519,21 @@ export class Game {
       } else if (this.focus?.kind === 'station') {
         const st = this.focus.station;
         G.ui.setPrompt(st.prompt, -1, 'E', st.name);
-        if (input.interactHit()) { audio.play('ui_open'); G.ui.open(st.kind); }
-      } else G.ui.setPrompt(null);
+        if (input.interactHit()) {
+          audio.play('ui_open');
+          if (st.kind === 'talk') G.ui.hint(`<b>${st.name}:</b> ${st.line ?? '…'}`, 8);
+          else G.ui.open(st.kind);
+        }
+      } else {
+        const cast = count('rod') > 0 || !S.flags.hint_rod ? this.castPoint() : null;
+        if (cast && count('rod') > 0) {
+          G.ui.setPrompt(count('bait') ? 'Cast a line' : 'Cast a line (no bait)', -1, 'E', 'Fishing');
+          if (input.interactHit()) this.fish(cast);
+        } else {
+          if (cast && !S.flags.hint_rod) { S.flags.hint_rod = true; G.ui.hint('Fish are rising. Buy a <b>fishing pole</b> and <b>bait</b> from a merchant to cast from the shore.', 9); }
+          G.ui.setPrompt(null);
+        }
+      }
       if (p.busy) {
         this.skinLoop -= dt;
         if (this.skinLoop <= 0) { this.skinLoop = 0.55; audio.play('skin', { volume: 0.7 }); }

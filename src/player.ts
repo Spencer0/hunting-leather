@@ -52,7 +52,8 @@ export class Player {
   private stepT = 0; private holdT = 0; private shotLock = 0; private upperHold = 0;
   private camPos = new THREE.Vector3();
   private landT = 0;
-  cine: { angle: number; anim: string } | null = null;
+  cine: { angle: number; anim: string; dist?: number; bobber?: THREE.Vector3 } | null = null;
+  private rod: THREE.Group | null = null; private bobber: THREE.Mesh | null = null; private line: THREE.Line | null = null;
   meleeT = -1; private meleeDone = false; private meleeAlt = false;
   private dagger: THREE.Object3D;
   private back = new THREE.Group();
@@ -398,6 +399,7 @@ export class Player {
       this.chest.quaternion.premultiply(_q.clone().invert().multiply(_q2).multiply(_q));
     }
     if (this.nocked) this.nocked.visible = this.drawing && w?.kind === 'bow';
+    this.fishingVisuals();
     if (w?.kind === 'bow' && this.weaponObj) {
       // carry the bow upright at the side when not aiming
       this.bowBlend = damp(this.bowBlend, this.aiming || this.upperHold > 0 ? 0 : 1, 10, dt);
@@ -407,6 +409,36 @@ export class Player {
     this.updateCamera(dt, w);
   }
 
+  /** Rod in hand, bobber on the water and a line between them while fishing. */
+  private fishingVisuals() {
+    const on = !!this.cine?.bobber;
+    if (on && !this.rod) {
+      this.rod = new THREE.Group();
+      const wood = new THREE.MeshLambertMaterial({ color: 0x8a5a2e });
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.035, 2.6, 6), wood);
+      pole.position.y = 1.1;
+      const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 8), new THREE.MeshLambertMaterial({ color: 0x55504a }));
+      reel.rotation.z = Math.PI / 2; reel.position.set(0.05, 0.15, 0);
+      this.rod.add(pole, reel);
+      this.rod.traverse((o) => { o.frustumCulled = false; o.castShadow = true; });
+      this.handR.add(this.rod);
+      this.bobber = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), new THREE.MeshLambertMaterial({ color: 0xe04a3a }));
+      this.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xf4f0e0, transparent: true, opacity: 0.8 }));
+      this.line.frustumCulled = false;
+      G.scene.add(this.bobber, this.line);
+    }
+    if (!this.rod || !this.bobber || !this.line) return;
+    this.rod.visible = on; this.bobber.visible = on; this.line.visible = on;
+    if (this.weaponObj) this.weaponObj.visible = !on && !(this.meleeT >= 0 && this.weaponObj.parent === this.handR);
+    if (!on) return;
+    const b = this.cine!.bobber!, bite = this.cine!.anim !== 'Fishing_Idle' && this.cine!.anim !== 'Fishing_Cast';
+    this.bobber.position.set(b.x + (bite ? Math.sin(G.time * 9) * 0.25 : 0), b.y + Math.sin(G.time * 2.2) * 0.03 - (bite ? 0.08 : 0), b.z + (bite ? Math.cos(G.time * 7) * 0.25 : 0));
+    this.obj.updateMatrixWorld(true);
+    const tip = this.rod.localToWorld(_v.set(0, 2.4, 0));
+    const pa = this.line.geometry.attributes.position as THREE.BufferAttribute;
+    pa.setXYZ(0, tip.x, tip.y, tip.z); pa.setXYZ(1, this.bobber.position.x, this.bobber.position.y, this.bobber.position.z);
+    pa.needsUpdate = true;
+  }
   private startMelee() {
     this.meleeT = 0; this.meleeDone = false; this.meleeAlt = !this.meleeAlt;
     this.drawing = false; this.draw = 0; this.throwT = -1;
@@ -501,7 +533,7 @@ export class Player {
   }
 
   private animate(hs: number, sprinting: boolean, w: WeaponDef | null) {
-    if (this.cine) { this.play(this.lower, 'Idle_A_L', 0.2); this.play(this.upper, this.cine.anim + '_U', 0.2); return; }
+    if (this.cine) { const f = this.cine.anim.startsWith('Fishing'); this.play(this.lower, (f ? this.cine.anim : 'Idle_A') + '_L', 0.2); this.play(this.upper, this.cine.anim + '_U', 0.2); return; }
     // lower body
     let lo = 'Idle_A', ls = 1;
     if (!this.grounded && Math.abs(this.vel.y) > 2.5) lo = 'Jump_Idle';
@@ -535,7 +567,8 @@ export class Player {
       const first = !this.cineOn; this.cineOn = true;
       this.fov = damp(this.fov, 42, 6, dt);
       cam.fov = this.fov; cam.updateProjectionMatrix();
-      const want = _n.set(this.pos.x + Math.sin(this.cine.angle) * 3.3, this.pos.y + 1.9, this.pos.z + Math.cos(this.cine.angle) * 3.3);
+      const cd = this.cine.dist ?? 3.3;
+      const want = _n.set(this.pos.x + Math.sin(this.cine.angle) * cd, this.pos.y + 1.9 + (cd - 3.3) * 0.5, this.pos.z + Math.cos(this.cine.angle) * cd);
       if (first) this.camPos.copy(want); else this.camPos.lerp(want, 1 - Math.exp(-3 * dt));
       cam.position.copy(this.camPos);
       cam.lookAt(this.pos.x, this.pos.y + 1.05, this.pos.z);

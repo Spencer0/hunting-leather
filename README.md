@@ -13,7 +13,8 @@ day/night, generative music, save slots and gamepad support.
 | ![Greenhollow Vale](docs/greenhollow.jpg) | ![Amberwood](docs/amberwood.jpg) |
 | ![Sunscar Steppe](docs/sunscar.jpg) | ![Frostfang Peaks](docs/frostfang.jpg) |
 | ![A wilderness camp at dusk](docs/camp.jpg) | ![Scraping a hide](docs/tanning.jpg) |
-| ![The crafting bench](docs/crafting.jpg) | |
+| ![The crafting bench](docs/crafting.jpg) | ![Fishing](docs/fishing.jpg) |
+| ![Rusthaven, the palisaded logging town](docs/rusthaven.jpg) | |
 
 ## The loop
 
@@ -24,8 +25,10 @@ day/night, generative music, save slots and gamepad support.
    then lay materials out on a 3×3 pattern grid and stitch them into trade goods or gear. Clean stitching makes
    *Fine* goods that sell for more.
 4. **Sell** — every town values things differently. Furs are worth a fortune on the steppe.
-5. **Rank up** — earn Hunter Rank, spend skill points on nine perks, and unlock the wagon road to the next region.
-6. **End the legends** — each region hides a legendary beast. The last one has never been taken.
+5. **Fish** — buy a pole and bait and cast from any lake shore: wait for the bite, track the fish with the
+   mouse, then land it with a quick key sequence. Twelve fish, three per region, the rare ones fight harder.
+6. **Rank up** — earn Hunter Rank, spend skill points on nine perks, and unlock the wagon road to the next region.
+7. **End the legends** — each region hides a legendary beast. The last one has never been taken.
 
 | Region | Town | Rank | Game |
 | --- | --- | --- | --- |

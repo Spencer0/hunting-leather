@@ -174,9 +174,9 @@ export function buildTerrain(zone: ZoneDef): Terrain {
     for (const l of lakes) {
       const d = Math.hypot(x - l.x, z - l.z) / l.r;
       if (d < 2.2) {
-        const flat = smooth(2.2, 1.0, d);
-        y = lerp(y, base - 0.2, flat * 0.9);
-        y -= smooth(1.15, 0.2, d) * 3.6;
+        // level the basin completely, then scoop it out so every lake is properly deep
+        y = lerp(y, base - 0.2, smooth(2.2, 1.2, d));
+        y -= smooth(1.1, 0.25, d) * 3.4;
       }
     }
     return y;

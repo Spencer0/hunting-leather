@@ -4,6 +4,7 @@ import type { Animal } from './animals';
 import { audio } from './audio';
 import { G } from './ctx';
 import { GEAR, GOODS_QUALITY, ITEMS, MAX_LEVEL, PERKS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, TIPS, WEAPONS, ZONES, ZONE_ORDER, gridKey, patternCells, xpForLevel, type GearSlot, type RecipeDef, type WeaponDef } from './data';
+import { Fishing, type FishOpts } from './fishing';
 import { Minigame, type MiniOpts } from './minigame';
 import { icon } from './icons';
 import { input, lockPointer, locked, unlockPointer, usingPad } from './input';
@@ -244,7 +245,7 @@ export class UI {
   }
 
   // ---------- panels ----------
-  private mg: Minigame | null = null;
+  private mg: Minigame | Fishing | null = null;
   get miniActive() { return !!this.mg; }
   /** Run a bench minigame with the camera circling the hunter at work. */
   startMini(o: MiniOpts, anim: 'Working_A' | 'Hammering') {
@@ -259,6 +260,24 @@ export class UI {
       G.game.benchScene(false);
       this.showHud(true);
       done(score);
+    } });
+    this.panel = this.mg.el;
+    this.root.append(this.mg.el);
+  }
+  /** Fishing: same overlay slot as the bench minigames, with the hunter posed at the water. */
+  startFishing(o: FishOpts) {
+    this.close(true);
+    this.kind = 'mini'; this.isOpen = true;
+    G.player.frozen = true;
+    unlockPointer();
+    this.showHud(false);
+    const done = o.onDone;
+    this.mg = new Fishing({ ...o, onDone: (r) => {
+      this.mg?.destroy(); this.mg = null; this.panel = null; this.kind = null; this.isOpen = false;
+      G.player.frozen = false;
+      this.showHud(true);
+      if (G.game.playing) lockPointer();
+      done(r);
     } });
     this.panel = this.mg.el;
     this.root.append(this.mg.el);
@@ -320,6 +339,8 @@ export class UI {
       case 'wagon': return this.renderWagon();
       case 'campfire': return this.renderCamp();
       case 'bedroll': return this.renderBedroll();
+      case 'fishmonger': return this.renderFishmonger();
+      case 'lodge': return this.renderLodge();
       case 'journal': return this.renderJournal();
       case 'pause': return this.renderPause();
       case 'options': return this.renderOptions();
@@ -335,7 +356,7 @@ export class UI {
     const bias = ZONES[S.zone].priceBias;
     if (this.tab === 'Sell') {
       const keys = Object.keys(S.inv).filter((k) => { const c = ITEMS[splitKey(k)[0]]?.cat; return c && c !== 'ammo' && c !== 'supply'; });
-      const order = ['goods', 'leather', 'fur', 'hide', 'trophy', 'meat'];
+      const order = ['goods', 'leather', 'fur', 'hide', 'trophy', 'fish', 'meat'];
       keys.sort((a, b) => order.indexOf(ITEMS[splitKey(a)[0]].cat) - order.indexOf(ITEMS[splitKey(b)[0]].cat) || sellValue(b, S.zone) - sellValue(a, S.zone));
       const goods = keys.filter((k) => ITEMS[splitKey(k)[0]].cat === 'goods');
       const top = $(`<div class="row" style="background:none"><div class="nm"><small>${Object.entries(bias).filter(([, v]) => v !== 1).map(([k, v]) => `${k} ${v > 1 ? '▲' : '▼'}${Math.round(Math.abs(v - 1) * 100)}%`).join(' · ') || 'Fair prices'}</small></div></div>`);
@@ -477,10 +498,45 @@ export class UI {
     const n = count('meat');
     const st = $(`<div class="stack" style="flex:1"><div class="say">${n} game meat · each cut restores 14 health · ${Math.ceil(S.hp)} / ${maxHp()}</div></div>`);
     st.append(this.btn('Roast 1 cut', () => { G.game.cook(1); this.render(); }, '', !n || S.hp >= maxHp()),
-      this.btn('Roast until healed', () => { G.game.cook(Math.ceil((maxHp() - S.hp) / 14)); this.render(); }, '', !n || S.hp >= maxHp()), this.btn('Leave', () => this.close(), 'alt'));
+      this.btn('Roast until healed', () => { G.game.cook(Math.ceil((maxHp() - S.hp) / 14)); this.render(); }, '', !n || S.hp >= maxHp()),
+      this.btn('Grill a fish (+24)', () => { G.game.cookFish(); this.render(); }, 'alt', !G.game.cheapestFish() || S.hp >= maxHp()), this.btn('Leave', () => this.close(), 'alt'));
     body.append(st);
   }
 
+  private renderFishmonger() {
+    const { body } = this.frame(this.npcName('fishmonger'), []);
+    const col = $('<div class="col"></div>');
+    body.append(col);
+    const fish = Object.keys(S.inv).filter((k) => ITEMS[k]?.cat === 'fish');
+    const top = $('<div class="row" style="background:none"><div class="nm"><small>Best fish prices in the realm</small></div></div>');
+    top.append(this.btn(`Sell all fish (${coin(fish.reduce((s, k) => s + sellValue(k, S.zone) * count(k), 0))})`, () => { fish.forEach((k) => G.game.sell(k, count(k))); this.render(); }, '', !fish.length));
+    col.append(top);
+    for (const k of fish) col.append(this.rowEl(itemIcon(k), ITEMS[k].name, `×${count(k)}`, coin(sellValue(k, S.zone)), [this.btn('Sell 1', () => { G.game.sell(k, 1); this.render(); }, 'alt')]));
+    col.append($('<h3 class="sec">Tackle</h3>'));
+    for (const id of G.game.shopStock('fishmonger')) {
+      const it = ITEMS[id], pr = buyPrice(id), has = id === 'rod' && count('rod') > 0;
+      col.append(this.rowEl(itemIcon(id), it.name, has ? 'owned' : `${it.desc}${id === 'bait' ? ` · have ${count(id)}` : ''}`, coin(pr), id === 'rod'
+        ? [this.btn('Buy', () => { G.game.buy(id, 1); this.render(); }, '', S.gold < pr || has)]
+        : [this.btn('Buy 1', () => { G.game.buy(id, 1); this.render(); }, 'alt', S.gold < pr), this.btn('Buy 10', () => { G.game.buy(id, 10); this.render(); }, '', S.gold < pr * 10)]));
+    }
+    const caught = Object.entries(S.fish ?? {});
+    if (caught.length) { col.append($('<h3 class="sec">Your catches</h3>')); for (const [id, n] of caught) col.append($(`<div class="kv"><span>${ITEMS[id].name}</span><span>${n}</span></div>`)); }
+  }
+  private renderLodge() {
+    const { body } = this.frame(this.npcName('lodge'), []);
+    const col = $('<div class="col"></div>');
+    body.append(col);
+    const b = G.game.bounties(), total = b.reduce((s, [, n, each]) => s + n * each, 0);
+    col.append($('<h3 class="sec">Predator bounties</h3>'));
+    for (const [id, n, each] of b) col.append(this.rowEl(icon('paw', ITEMS[SPECIES[id].hide].color, 36), SPECIES[id].name, `${n} unclaimed · ${S.kills[id] ?? 0} taken`, `${coin(each)} each`, []));
+    const claim = $('<div class="row" style="background:none"><div class="nm"></div></div>');
+    claim.append(this.btn(`Claim ${coin(total)}`, () => { G.game.claimBounties(); this.render(); }, '', !total));
+    col.append(claim, $('<h3 class="sec">Trophies wanted <span class="muted" style="float:right;letter-spacing:0;text-transform:none">pays half again over market</span></h3>'));
+    const tro = Object.keys(S.inv).filter((k) => ITEMS[k]?.cat === 'trophy');
+    if (!tro.length) col.append($('<p class="muted">Bring antlers, fangs and horns.</p>'));
+    for (const k of tro) col.append(this.rowEl(itemIcon(k), ITEMS[k].name, `×${count(k)}`, coin(Math.round(sellValue(k, S.zone) * 1.5)), [
+      this.btn('Sell 1', () => { G.game.sell(k, 1, 1.5); this.render(); }, 'alt'), this.btn('All', () => { G.game.sell(k, count(k), 1.5); this.render(); }, '', count(k) < 2)]));
+  }
   private renderBoard() {
     const { body } = this.frame('Notice Board', []);
     const col = $('<div class="col"></div>');
@@ -538,7 +594,7 @@ export class UI {
       }
       const grid = $('<div class="grid"></div>');
       const keys = Object.keys(S.inv);
-      const order = ['goods', 'leather', 'fur', 'hide', 'trophy', 'meat', 'ammo', 'supply'];
+      const order = ['goods', 'leather', 'fur', 'hide', 'trophy', 'fish', 'meat', 'ammo', 'supply'];
       keys.sort((a, b) => order.indexOf(ITEMS[splitKey(a)[0]].cat) - order.indexOf(ITEMS[splitKey(b)[0]].cat));
       if (!this.sel) this.sel = keys[0] ?? '';
       for (const k of keys) {

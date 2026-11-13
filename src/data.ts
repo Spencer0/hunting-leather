@@ -152,7 +152,7 @@ export const ZONES: Record<string, ZoneDef> = {
     grassColor: 0x8a7a2c, grassTip: 0xe0b040, ground: ['leaves', 'dirt', 'rock'], groundTint: 0xffffff,
     bushes: [['Bush_Common', 4], ['Fern_1', 4], ['Mushroom_Laetiporus', 2], ['Mushroom_Common', 3], ['Plant_7_Big', 2]], bushTint: 0xd8a040, rocks: 70,
     fogDay: 0xe8cfa0, fogDensity: 0.0075, skyTop: 0x5a8fc8, hillAmp: 12, water: -3.4, waterColor: 0x4a7f86, snow: false, grassAmount: 0.7, step: 'grass',
-    music: 57, scale: [0, 2, 3, 7, 9], priceBias: { fur: 1.1, leather: 0.9, goods: 1.1, trophy: 0.9, meat: 1 },
+    music: 57, scale: [0, 2, 3, 7, 9], priceBias: { fur: 1.1, leather: 0.9, goods: 1.1, trophy: 0.9, meat: 1, fish: 1.3 },
   },
   sunscar: {
     id: 'sunscar', name: 'Sunscar Steppe', town: 'Dunmarch', rank: 8, fare: 120, subtitle: 'Gold grass, red stone, long horizons', seed: 37,
@@ -175,7 +175,7 @@ export const ZONES: Record<string, ZoneDef> = {
 };
 export const ZONE_ORDER = ['greenhollow', 'amberwood', 'sunscar', 'frostfang'];
 
-export type ItemCat = 'hide' | 'leather' | 'fur' | 'goods' | 'trophy' | 'meat' | 'ammo' | 'supply' | 'gear' | 'weapon';
+export type ItemCat = 'hide' | 'leather' | 'fur' | 'goods' | 'trophy' | 'meat' | 'fish' | 'ammo' | 'supply' | 'gear' | 'weapon';
 export interface ItemDef {
   id: string;
   name: string;
@@ -234,6 +234,21 @@ item('bark', 'Oak-bark Liquor', 'supply', 7, 0.3, 'tonic', '#8a5a2a', 'A slow, r
 item('thread', 'Waxed Thread', 'supply', 2, 0.05, 'thread', '#e8d090', 'Holds leatherwork together.', 5);
 item('rivets', 'Brass Rivets', 'supply', 6, 0.1, 'rivet', '#e0b040', 'For work that has to last.', 14, 1);
 item('tonic', 'Hunter’s Tonic', 'supply', 12, 0.3, 'tonic', '#e05858', 'Restores 60 health. Tastes like regret.', 30);
+item('rod', 'Fishing Pole', 'supply', 20, 1, 'rod', '#a8743c', 'Cast it from any lake shore.', 60);
+item('bait', 'Bait', 'supply', 1, 0.05, 'bait', '#d87a8a', 'One wriggling worm per cast.', 3);
+// Fish: [common, uncommon, rare] per region
+item('f_trout', 'Brook Trout', 'fish', 16, 0.6, 'fish', '#9ab86a', 'Speckled and quick. Good eating.');
+item('f_perch', 'Golden Perch', 'fish', 36, 0.8, 'fish', '#e0b040', 'Shines like a coin in the shallows.');
+item('f_catfish', 'Old Whiskers', 'fish', 150, 3, 'fish', '#6a6a78', 'The Greenhollow catfish every child is warned about.');
+item('f_carp', 'Amber Carp', 'fish', 26, 1, 'fish', '#e08a3a', 'Fat on fallen leaves.');
+item('f_pike', 'Wood Pike', 'fish', 58, 1.5, 'fish', '#6a8a5a', 'All teeth and temper.');
+item('f_leafscale', 'Leafscale', 'fish', 210, 2, 'fish', '#d84a2a', 'Red as the canopy. Anglers wait years for one.');
+item('f_barbel', 'Mud Barbel', 'fish', 34, 1, 'fish', '#a88a5a', 'Lives where the oasis silts up.');
+item('f_sunfish', 'Sunfish', 'fish', 74, 1.2, 'fish', '#f0c84a', 'Warm to the touch, they say.');
+item('f_koi', 'Oasis Koi', 'fish', 290, 2.5, 'fish', '#f4f0e8', 'White and gold. Caravan masters pay silly money.');
+item('f_char', 'Ice Char', 'fish', 52, 1, 'fish', '#8ac0d8', 'Pink-fleshed and half frozen.');
+item('f_salmon', 'Frost Salmon', 'fish', 108, 2, 'fish', '#d87a7a', 'Runs the meltwater every thaw.');
+item('f_sturgeon', 'Glacier Sturgeon', 'fish', 420, 5, 'fish', '#aab8c8', 'Older than the town. Armoured like a knight.');
 // Trade goods (crafted, for sale)
 item('g_pouch', 'Coin Pouch', 'goods', 95, 0.3, 'pouch', '#d2a56b', 'Every town needs these.');
 item('g_gloves', 'Kid Gloves', 'goods', 135, 0.3, 'glove', '#d2a56b', 'Fine light-leather gloves.');
@@ -246,6 +261,10 @@ item('g_saddle', 'Steppe Saddle', 'goods', 940, 6, 'saddle', '#5a3a26', 'Heavy-l
 item('g_drum', 'War Drum', 'goods', 700, 4, 'drum', '#5a3a26', 'Stretched heavy hide over a horn-pegged frame.');
 item('g_mantle', 'Royal Mantle', 'goods', 1400, 3, 'cloak', '#f4fbff', 'Fit for a throne room. Almost a shame to sell.');
 export const ITEMS = I;
+export const FISH: Record<string, [string, string, string]> = {
+  greenhollow: ['f_trout', 'f_perch', 'f_catfish'], amberwood: ['f_carp', 'f_pike', 'f_leafscale'],
+  sunscar: ['f_barbel', 'f_sunfish', 'f_koi'], frostfang: ['f_char', 'f_salmon', 'f_sturgeon'],
+};
 
 // Tanning: hide -> material, base yield at Good quality
 export const TANNING: Record<string, [string, number]> = {
@@ -398,6 +417,8 @@ export const TIPS = [
   'Retrieve your arrows from the ground and from your kills.',
   'Legendary beasts leave signs. Check the notice board for rumours.',
   'Roast game meat at any campfire to restore health in the field.',
+  'Buy a fishing pole and bait, then cast from any lake shore. Rare fish fight harder.',
+  'Rusthaven’s fishmonger pays the best prices for fish; its huntmaster pays bounties on wolves.',
   'Press F to slash with your knife. It staggers anything that gets too close.',
   'Nail the timing at the tanning bench for extra leather, and at the stitching for Fine goods.',
   'A heavier pack lets you stay out longer. Craft one at the tanner’s bench.',

@@ -1,14 +1,14 @@
 // Zone assembly: terrain, vegetation, grass, water, town, camps, colliders, interactables, NPCs.
 import * as THREE from 'three';
-import { clips, model, rawModel } from './assets';
+import { clips, model, rawModel, uniqueMaterials } from './assets';
 import { icon } from './icons';
 import type { ZoneDef } from './data';
 import { CELL, PLAY, TOWN_R, WATER_Y, WORLD, buildTerrain, edgeDist, type Terrain } from './terrain';
 import { Noise, clamp, rng, smooth, weighted } from './util';
 
 export interface Collider { x: number; z: number; r: number; h: number; kind: 'tree' | 'rock' | 'building' | 'prop' }
-export type StationKind = 'merchant' | 'fletcher' | 'tanner' | 'inn' | 'wagon' | 'board' | 'campfire' | 'bedroll';
-export interface Station { kind: StationKind; pos: THREE.Vector3; radius: number; prompt: string; name: string; npc?: Npc }
+export type StationKind = 'merchant' | 'fletcher' | 'tanner' | 'inn' | 'wagon' | 'board' | 'campfire' | 'bedroll' | 'fishmonger' | 'lodge' | 'talk';
+export interface Station { kind: StationKind; pos: THREE.Vector3; radius: number; prompt: string; name: string; npc?: Npc; line?: string }
 
 const uTime = { value: 0 };
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _e = new THREE.Euler();
@@ -52,6 +52,48 @@ export class Npc {
     }
   }
 }
+/** Ambient townsfolk (or a dog) strolling between waypoints. */
+export class Walker {
+  obj: THREE.Object3D;
+  private mixer: THREE.AnimationMixer;
+  private walk: THREE.AnimationAction; private idle: THREE.AnimationAction;
+  private i = 0; private wait = Math.random() * 3; private moving = false;
+  constructor(path: string, scale: number, private pts: [number, number][], private speed: number, tint?: number) {
+    this.obj = model(path);
+    this.obj.scale.setScalar(scale);
+    if (tint !== undefined) for (const m of uniqueMaterials(this.obj)) m.color.multiply(new THREE.Color(tint));
+    this.mixer = new THREE.AnimationMixer(this.obj);
+    const animal = path.startsWith('animals/');
+    const find = (file: string, name: string) => clips(file).find((c) => c.name === name)!;
+    this.walk = this.mixer.clipAction(animal ? find(path, 'Walk') : find('anims/MovementBasic', 'Walking_A'));
+    this.idle = this.mixer.clipAction(animal ? find(path, 'Idle') : find('anims/General', 'Idle_A'));
+    this.idle.play();
+    this.i = Math.floor(Math.random() * pts.length);
+    this.obj.position.set(pts[this.i][0], 0, pts[this.i][1]);
+  }
+  update(dt: number, height: (x: number, z: number) => number, player: THREE.Vector3) {
+    const p = this.obj.position;
+    if (Math.hypot(p.x - player.x, p.z - player.z) > 90) return;
+    this.mixer.update(dt);
+    const near = Math.hypot(p.x - player.x, p.z - player.z) < 1.6;
+    if (this.wait > 0 || near) {
+      this.wait -= dt;
+      if (this.moving) { this.moving = false; this.idle.reset().fadeIn(0.3).play(); this.walk.fadeOut(0.3); }
+      if (this.wait <= 0 && !near) { this.i = (this.i + 1) % this.pts.length; }
+    } else {
+      if (!this.moving) { this.moving = true; this.walk.reset().fadeIn(0.3).play(); this.idle.fadeOut(0.3); }
+      const [tx, tz] = this.pts[this.i], dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz);
+      if (d < 0.4) this.wait = 2 + Math.random() * 6;
+      else {
+        p.x += (dx / d) * this.speed * dt; p.z += (dz / d) * this.speed * dt;
+        let diff = (Math.atan2(dx, dz) - this.obj.rotation.y) % (Math.PI * 2);
+        if (diff > Math.PI) diff -= Math.PI * 2; else if (diff < -Math.PI) diff += Math.PI * 2;
+        this.obj.rotation.y += diff * Math.min(1, dt * 6);
+      }
+    }
+    p.y = height(p.x, p.z);
+  }
+}
 export const CHAR_SCALE = 0.74;
 const TOWN_SCALE = 8.5;
 
@@ -91,6 +133,7 @@ export class Zone {
   group = new THREE.Group();
   stations: Station[] = [];
   npcs: Npc[] = [];
+  walkers: Walker[] = [];
   fires: { pos: THREE.Vector3; sprites: THREE.Sprite[]; light: THREE.PointLight }[] = [];
   private grid = new Map<number, Collider[]>();
   private grassChunks: THREE.InstancedMesh[] = [];
@@ -451,6 +494,7 @@ export class Zone {
   }
   private marker(kind: StationKind, pos: THREE.Vector3, h: number) {
     const ic: Record<string, [string, string]> = { merchant: ['coin', '#e0b040'], fletcher: ['bow', '#c8a070'], tanner: ['hide', '#b98a58'], inn: ['bed', '#c86a5a'], wagon: ['wagon', '#99643a'], board: ['scroll', '#e8dcc0'] };
+    ic.fishmonger = ['fish', '#6aa8c8']; ic.lodge = ['skull', '#c8483a'];
     const def = ic[kind];
     if (!def) return;
     const c = document.createElement('canvas');
@@ -490,8 +534,175 @@ export class Zone {
     this.fires.push({ pos, sprites, light });
   }
 
+  /**
+   * Rusthaven: a palisaded logging town. One main street from the south gate to the Hunters' Lodge,
+   * shops facing each other across it, a bonfire square, lumber yard, fishmonger and patrolling townsfolk.
+   */
+  private buildRusthaven() {
+    const t = this.terrain, c = t.town;
+    const W = (dx: number, dz: number): [number, number] => [c.x + dx, c.z + dz];
+    const put = (path: string, dx: number, dz: number, ry: number, s: number, col = 0, y = 0, tint?: number) => { const [x, z] = W(dx, dz); return this.prop(path, x, z, ry, s, col, y, tint); };
+    const E = Math.PI / 2, Wst = -Math.PI / 2, S0 = 0, N = Math.PI; // facing: east, west, south, north
+    // --- buildings ---
+    put('town/building_townhall_blue', 0, -31, S0, 8.5, 6.2, -0.05);
+    put('town/building_tavern_blue', -19, -11, E, 8.5, 5.6, -0.05);
+    put('town/building_workshop_blue', -19, 9, E, 8.5, 5.2, -0.05);
+    put('town/building_home_A_blue', -21, 26, E, 8, 3.5, -0.05);
+    put('town/building_market_blue', 20, -11, Wst, 8.5, 6.2, -0.05);
+    put('town/building_blacksmith_blue', 19, 9, Wst, 8.5, 5.2, -0.05);
+    put('town/building_home_B_blue', 21, 26, Wst, 8, 3.5, -0.05);
+    put('town/building_lumbermill_blue', 28, -27, -2.3, 8, 5.2, -0.05);
+    put('town/building_stables_blue', -28, -27, 2.3, 8, 5.2, -0.05);
+    put('town/building_watchtower_blue', -9.5, 37, N, 7.5, 3.4, -0.05);
+    put('town/building_watchtower_blue', 9.5, 37, N, 7.5, 3.4, -0.05);
+    put('town/building_home_A_blue', -32, 6, E, 7.5, 3.3, -0.05);
+    put('town/building_home_B_blue', 33, 5, Wst, 7.5, 3.3, -0.05);
+    put('town/building_well_blue', -5, -19, 0, 6, 1.6);
+    // --- palisade ---
+    {
+      const geo = new THREE.CylinderGeometry(0.02, 0.27, 3.6, 6);
+      const mat = new THREE.MeshLambertMaterial({ color: 0x7a5636 });
+      const R = 40.5, n = Math.floor((Math.PI * 2 * R) / 0.5);
+      const mats: THREE.Matrix4[] = [];
+      const r = rng(77);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const gate = Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) < 0.13;
+        if (gate) continue;
+        const x = c.x + Math.sin(a) * R, z = c.z + Math.cos(a) * R;
+        _m.compose(_p.set(x, t.height(x, z) + 1.5 + r() * 0.3, z), _q.setFromEuler(_e.set((r() - 0.5) * 0.08, r() * 6, (r() - 0.5) * 0.08)), _s.set(1, 1, 1));
+        mats.push(_m.clone());
+        if (i % 3 === 0) this.addCollider({ x, z, r: 0.85, h: 4, kind: 'prop' });
+      }
+      const im = new THREE.InstancedMesh(geo, mat, mats.length);
+      mats.forEach((m, i) => im.setMatrixAt(i, m));
+      im.castShadow = true; im.receiveShadow = true;
+      im.computeBoundingSphere();
+      this.group.add(im);
+      this.disposables.push(geo, mat);
+    }
+    const station = (kind: StationKind, dx: number, dz: number, prompt: string, name: string, npcModel?: string, ndx = 0, ndz = 0, nry = 0, working = false, line?: string, tint?: number) => {
+      const [x, z] = W(dx, dz);
+      const pos = new THREE.Vector3(x, t.height(x, z), z);
+      let npc: Npc | undefined;
+      if (npcModel) {
+        const [nx, nz] = W(ndx, ndz);
+        npc = new Npc(npcModel, new THREE.Vector3(nx, t.height(nx, nz), nz), nry, name, working);
+        if (tint !== undefined) for (const m of uniqueMaterials(npc.obj)) m.color.multiply(new THREE.Color(tint));
+        this.npcs.push(npc);
+        this.group.add(npc.obj);
+        this.addCollider({ x: nx, z: nz, r: 0.45, h: 2, kind: 'prop' });
+      }
+      this.stations.push({ kind, pos, radius: kind === 'talk' ? 2.4 : 3.1, prompt, name, npc, line });
+      this.marker(kind, npc ? npc.pos : pos, npc ? 2.5 : 3.1);
+    };
+    // --- market row (east side of the street) ---
+    put('props/Stall_Empty', 10.5, -8, Wst, 1.05, 1.2);
+    put('props/Crate_Wooden', 10.8, -4.6, 0.3, 1, 0.6); put('props/Barrel_Apples', 10.6, -11.2, 0, 1, 0.5); put('props/FarmCrate_Apple', 12.2, -4.2, 1, 1, 0.5);
+    station('merchant', 7.6, -8, 'Trade', 'Isolde the Merchant', 'Rogue', 12.4, -8, Wst);
+    put('props/Stall_Cart_Empty', 10.6, 1.5, Wst, 0.95, 1.5);
+    put('props/Barrel', 10.4, 5.2, 0, 1, 0.5, 0, 0x8ab0c8); put('props/Barrel', 11.6, 5.9, 0, 1, 0.5, 0, 0x8ab0c8);
+    station('fishmonger', 7.6, 1.2, 'Fish & tackle', 'Wick the Fishmonger', 'Engineer', 12.6, 1.2, Wst, false, undefined, 0xb8d8e8);
+    // --- bowyer at the smithy ---
+    put('props/WeaponStand', 12.5, 13.5, Wst, 1.1, 0.8); put('props/Dummy', 9.5, 19, -2.2, 1, 0.5); put('town/target', 13.5, 20.5, -2.4, 7, 0.8); put('town/bucket_arrows', 12.6, 10.6, 0, 6, 0.4);
+    put('props/Anvil_Log', 14.5, 6.4, 0.4, 1.1, 0.6);
+    station('fletcher', 8.6, 12.6, 'Browse weapons', 'Brannoc the Bowyer', 'Knight', 11.2, 12.2, Wst, false, undefined, 0xe0c8a0);
+    // --- tannery (west side) ---
+    put('props/Workbench', -10.6, 11.4, 2.42, 1.05, 1.1); put('props/Peg_Rack', -13.5, 14.5, E, 1.2, 0, 1.2); put('props/Chest_Wood', -13, 5.6, E, 1, 0.6); put('props/Barrel', -11.4, 4.2, 0, 1, 0.5);
+    station('tanner', -8.6, 9.6, 'Use tanning bench', 'Hesper the Tanner', 'Druid', -11.8, 8, E, true);
+    // --- inn ---
+    put('props/Bench', -12.2, -14.5, E, 1.05, 0.8); put('props/Table_Large', -11.6, -6.5, E, 1.1, 1.1); put('props/Stool', -9.6, -6, 0, 1, 0); put('props/Stool', -9.8, -7.6, 0, 1, 0);
+    station('inn', -9, -10.5, 'Talk to the innkeeper', 'Odo the Innkeeper', 'Barbarian', -11.4, -10.5, E, false, undefined, 0xd8c0a0);
+    // --- hunters' lodge ---
+    put('props/Banner_1', -4.2, -23.4, S0, 1.3, 0.2); put('props/Banner_2', 4.2, -23.4, S0, 1.3, 0.2);
+    put('town/weaponrack', 6.4, -24.5, S0, 7, 0.7); put('props/WeaponStand', -6.6, -24.6, S0, 1.1, 0.8); put('props/Dummy', 9, -22, 0.6, 1, 0.5);
+    station('lodge', 0.8, -20.5, 'Speak with the huntmaster', 'Sable the Huntmaster', 'Rogue_Hooded', 0.8, -23, S0);
+    // --- wagon yard ---
+    put('town/cart_merchant', -20.5, -21, 0.9, 7, 1.9); put('town/haybale', -24.5, -17.5, 0.5, 7, 0.9); put('town/haybale', -26.2, -19.6, 1.3, 7, 0.9); put('town/trough', -17, -25.5, 2.3, 7, 0.8);
+    station('wagon', -17.2, -18, 'Travel', 'Petra the Wagoner', 'Mage', -18.6, -20.2, 0.9, false, undefined, 0xc8e0a8);
+    // --- lumber yard ---
+    for (const [dx, dz, ry] of [[21, -20, 0.4], [24.5, -18.5, 0.5], [22.5, -22.5, 0.3], [18, -24, 1.9], [30, -18, 1.2]] as [number, number, number][]) put('town/resource_lumber', dx, dz, ry, 8, 1.2);
+    put('props/k_tree-log', 26, -15, 0.9, 4.4, 0.6, 0, 0x8a6a50); put('props/k_tree-log', 16.5, -19.5, 2.2, 3.6, 0.6, 0, 0x8a6a50); put('town/wheelbarrow', 19, -16.5, 2.6, 7, 0.9); put('town/pallet', 27.5, -21.5, 0.2, 7, 0);
+    station('talk', 22.5, -16.5, 'Talk', 'Lumberjack', 'Barbarian', 23.6, -15.4, -2.3, true, 'Amberwood oak tans the richest leather. Buy bark liquor and your hides go further.');
+    // --- bonfire square ---
+    {
+      const [x, z] = W(0, 2);
+      this.prop('props/k_campfire-pit', x, z, 0, 8, 1.0, 0, 0x9a8a80);
+      const pos = new THREE.Vector3(x, t.height(x, z), z);
+      this.fire(pos);
+      this.stations.push({ kind: 'campfire', pos, radius: 3, prompt: 'Cook at the fire', name: 'Bonfire' });
+      put('props/k_tree-log', -3.4, 3.4, 0.9, 3.6, 0.6, 0, 0x8a6a50); put('props/k_tree-log', 3.2, 4.2, -0.8, 3.6, 0.6, 0, 0x8a6a50); put('props/k_tree-log', 0.4, -1.9, 1.6, 3.6, 0.6, 0, 0x8a6a50);
+    }
+    // notice board by the gate road
+    {
+      const [x, z] = W(-5.5, 20);
+      this.noticeBoard(x, z, E);
+      this.stations.push({ kind: 'board', pos: new THREE.Vector3(x + 1.4, t.height(x, z), z), radius: 2.6, prompt: 'Read the notice board', name: 'Notice Board' });
+      this.marker('board', new THREE.Vector3(x, t.height(x, z), z), 3.1);
+    }
+    // --- gate ---
+    put('town/flag_red', -5.4, 39.5, N, 9, 0.3); put('town/flag_red', 5.4, 39.5, N, 9, 0.3);
+    station('talk', -3.6, 31.5, 'Talk', 'Gate Guard', 'Knight', -4.6, 33.4, 0.3, false, 'Wolves have been bold since the leaves turned. The huntmaster pays coin for every one you put down.');
+    station('talk', 3.6, 31.5, 'Talk', 'Gate Guard', 'Knight', 4.6, 33.4, -0.3, false, 'Stags keep to the deep wood. The white one? North, where the dead trees stand in a ring. Bring a heavy bow.');
+    // --- dressing ---
+    const deco: [string, number, number, number, number, number][] = [
+      ['town/barrel', 13.6, -15.5, 0, 7, 0.7], ['town/crate_A_big', 14.5, -3.5, 0.4, 7, 0.9], ['town/sack', 9.2, -12.6, 0, 7, 0], ['town/crate_long_A', -13.8, 0.2, 1.5, 7, 0.9], ['town/barrel', -13.6, -3, 0, 7, 0.7],
+      ['town/crate_B_small', -7.2, 26.5, 0.3, 7, 0.5], ['town/barrel', 7.5, 27.5, 0, 7, 0.7], ['town/haybale', 14.5, 29.5, 0.7, 7, 0.9], ['town/sack', -14.5, 20.5, 1, 7, 0], ['town/crate_A_big', 6.2, 33.5, 0.2, 7, 0.9],
+      ['props/Barrel', -6.5, -15.5, 0, 1, 0.5], ['props/Crate_Wooden', 13, 24, 0.5, 1, 0.6], ['town/weaponrack', -7.5, 34.5, 0.2, 7, 0.7],
+    ];
+    for (const [pth, dx, dz, ry, sc, col] of deco) put(pth, dx, dz, ry, sc, col);
+    // street lanterns
+    for (const [dx, dz] of [[-5.5, -14], [5.5, -1], [-5.5, 14], [5.5, 28]] as [number, number][]) {
+      const [x, z] = W(dx, dz);
+      const l = new THREE.PointLight(0xffb060, 0, 24, 1.4);
+      l.position.set(x, c.y + 3.2, z);
+      this.lamps.push(l);
+      this.group.add(l);
+      this.prop('props/Torch_Metal', x, z, 0, 1.6, 0.2);
+    }
+    // --- townsfolk on the move ---
+    const route = (pts: [number, number][]) => pts.map(([dx, dz]) => W(dx, dz));
+    const folk: [string, number, [number, number][], number, number | undefined][] = [
+      ['chars/Mage', CHAR_SCALE, [[-3, 26], [-3.5, 6], [-4, -16], [3.5, -17], [3, 8], [3.5, 27]], 1.25, 0xe8b0a0],
+      ['chars/Druid', CHAR_SCALE, [[5, -16], [15, -18], [5.5, -3], [-6, -4], [-6.5, 16]], 1.1, 0xd0d0f0],
+      ['chars/Engineer', CHAR_SCALE * 0.94, [[16, -21], [5, -20], [4.5, 22], [14, 23]], 1.35, 0xf0d8a0],
+      ['chars/Rogue', CHAR_SCALE * 0.72, [[-2, 8], [5, 16], [-5, 24], [-6, -2], [2, -6]], 2.3, 0xffd0b0], // a child, always running
+      ['animals/Husky', 0.27, [[2, 6], [-4, 12], [-6, 28], [4, 30], [6, 16], [-3, -8]], 1.7, 0xc8a070],
+    ];
+    for (const [path, sc, pts, sp, tint] of folk) {
+      const w = new Walker(path, sc, route(pts), sp, tint);
+      this.walkers.push(w);
+      this.group.add(w.obj);
+    }
+  }
+
+  private noticeBoard(x: number, z: number, ry: number) {
+    const t = this.terrain;
+    const g = new THREE.Group();
+    const wood = new THREE.MeshLambertMaterial({ color: 0x6a4a2e }), paper = new THREE.MeshLambertMaterial({ color: 0xe8dcc0 });
+    const postG = new THREE.BoxGeometry(0.16, 2.4, 0.16);
+    const p1 = new THREE.Mesh(postG, wood), p2 = new THREE.Mesh(postG, wood);
+    p1.position.set(-0.95, 1.2, 0); p2.position.set(0.95, 1.2, 0);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.25, 0.1), wood); board.position.y = 1.55;
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.12, 0.5), wood); roof.position.y = 2.42; roof.rotation.x = 0.15;
+    g.add(p1, p2, board, roof);
+    const rr = rng(7);
+    for (let i = 0; i < 5; i++) {
+      const n = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.44), paper);
+      n.position.set(-0.75 + i * 0.37, 1.5 + (rr() - 0.5) * 0.3, 0.06); n.rotation.z = (rr() - 0.5) * 0.3;
+      g.add(n);
+    }
+    g.traverse((o) => { o.castShadow = true; });
+    g.position.set(x, t.height(x, z), z);
+    g.rotation.y = ry;
+    this.group.add(g);
+    this.disposables.push(wood, paper, postG);
+    this.addCollider({ x, z, r: 0.9, h: 3, kind: 'prop' });
+  }
+
   private buildTown() {
     const t = this.terrain, c = t.town, id = this.def.id;
+    if (id === 'amberwood') { this.buildRusthaven(); return; }
     const at = (deg: number, rad: number): [number, number] => [c.x + Math.sin((deg * Math.PI) / 180) * rad, c.z - Math.cos((deg * Math.PI) / 180) * rad];
     const face = (x: number, z: number) => Math.atan2(c.x - x, c.z - z);
     const building = (name: string, deg: number, rad: number, colR: number, s = TOWN_SCALE) => {
@@ -679,6 +890,7 @@ export class Zone {
     wu.light.value = 0.35 + 0.65 * (1 - night);
     for (const g of this.grassChunks) g.visible = Math.hypot(g.userData.cx - cam.x, g.userData.cz - cam.z) < 104;
     for (const n of this.npcs) n.update(dt, player);
+    for (const w of this.walkers) w.update(dt, this.terrain.height, player);
     for (const f of this.fires) {
       const d = f.pos.distanceTo(cam);
       const vis = d < 140;
