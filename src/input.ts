@@ -104,7 +104,8 @@ export const input = {
   interact: () => keys.has('KeyE') || pad(2),
   nextWeapon: () => wheel > 0 || padHit(5) || pressed.has('KeyQ'),
   prevWeapon: () => wheel < 0 || padHit(4),
-  slot: () => (pressed.has('Digit1') ? 0 : pressed.has('Digit2') ? 1 : pressed.has('Digit3') ? 2 : -1),
+  /** Index of the hotbar slot whose (rebindable) key was just pressed, or -1. */
+  hotbar: () => settings.hotkeys.findIndex((c) => pressed.has(c)),
   tonicHit: () => pressed.has('KeyH') || padHit(12),
   menuHit: () => pressed.has('Tab') || pressed.has('KeyI') || padHit(8),
   mapHit: () => pressed.has('KeyM'),

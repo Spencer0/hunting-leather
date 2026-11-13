@@ -2,12 +2,12 @@
 import * as THREE from 'three';
 import { clips, model, rawModel, uniqueMaterials } from './assets';
 import { icon } from './icons';
-import type { ZoneDef } from './data';
+import { HERBS, ITEMS, type ZoneDef } from './data';
 import { CELL, PLAY, TOWN_R, WATER_Y, WORLD, buildTerrain, edgeDist, type Terrain } from './terrain';
 import { Noise, clamp, rng, smooth, weighted } from './util';
 
 export interface Collider { x: number; z: number; r: number; h: number; kind: 'tree' | 'rock' | 'building' | 'prop' }
-export type StationKind = 'merchant' | 'fletcher' | 'tanner' | 'inn' | 'wagon' | 'board' | 'campfire' | 'bedroll' | 'fishmonger' | 'lodge' | 'talk';
+export type StationKind = 'merchant' | 'fletcher' | 'tanner' | 'inn' | 'wagon' | 'board' | 'campfire' | 'bedroll' | 'fishmonger' | 'lodge' | 'talk' | 'cauldron';
 export interface Station { kind: StationKind; pos: THREE.Vector3; radius: number; prompt: string; name: string; npc?: Npc; line?: string }
 
 const uTime = { value: 0 };
@@ -134,6 +134,7 @@ export class Zone {
   stations: Station[] = [];
   npcs: Npc[] = [];
   walkers: Walker[] = [];
+  herbs: { id: string; pos: THREE.Vector3; obj: THREE.Object3D; taken: boolean }[] = [];
   fires: { pos: THREE.Vector3; sprites: THREE.Sprite[]; light: THREE.PointLight }[] = [];
   private grid = new Map<number, Collider[]>();
   private grassChunks: THREE.InstancedMesh[] = [];
@@ -151,6 +152,7 @@ export class Zone {
     this.water = this.buildWater();
     this.buildTown();
     this.buildCamps();
+    this.buildHerbs();
     this.buildVegetation(quality);
     this.buildGrass(quality);
   }
@@ -494,7 +496,7 @@ export class Zone {
   }
   private marker(kind: StationKind, pos: THREE.Vector3, h: number) {
     const ic: Record<string, [string, string]> = { merchant: ['coin', '#e0b040'], fletcher: ['bow', '#c8a070'], tanner: ['hide', '#b98a58'], inn: ['bed', '#c86a5a'], wagon: ['wagon', '#99643a'], board: ['scroll', '#e8dcc0'] };
-    ic.fishmonger = ['fish', '#6aa8c8']; ic.lodge = ['skull', '#c8483a'];
+    ic.cauldron = ['tonic', '#6ac86a']; ic.fishmonger = ['fish', '#6aa8c8']; ic.lodge = ['skull', '#c8483a'];
     const def = ic[kind];
     if (!def) return;
     const c = document.createElement('canvas');
@@ -617,6 +619,7 @@ export class Zone {
     put('props/Banner_1', -4.2, -23.4, S0, 1.3, 0.2); put('props/Banner_2', 4.2, -23.4, S0, 1.3, 0.2);
     put('town/weaponrack', 6.4, -24.5, S0, 7, 0.7); put('props/WeaponStand', -6.6, -24.6, S0, 1.1, 0.8); put('props/Dummy', 9, -22, 0.6, 1, 0.5);
     station('lodge', 0.8, -20.5, 'Speak with the huntmaster', 'Sable the Huntmaster', 'Rogue_Hooded', 0.8, -23, S0);
+    { const [x, z] = W(-12.5, -23); this.cauldron(x, z); }
     // --- wagon yard ---
     put('town/cart_merchant', -20.5, -21, 0.9, 7, 1.9); put('town/haybale', -24.5, -17.5, 0.5, 7, 0.9); put('town/haybale', -26.2, -19.6, 1.3, 7, 0.9); put('town/trough', -17, -25.5, 2.3, 7, 0.8);
     station('wagon', -17.2, -18, 'Travel', 'Petra the Wagoner', 'Mage', -18.6, -20.2, 0.9, false, undefined, 0xc8e0a8);
@@ -674,6 +677,66 @@ export class Zone {
       this.walkers.push(w);
       this.group.add(w.obj);
     }
+  }
+
+  /** Gatherable herbs: a handful of each of the region's plants at seeded spots. */
+  private buildHerbs() {
+    const t = this.terrain, r = rng(this.def.seed * 101 + 9);
+    const ids = Object.keys(HERBS).filter((h) => HERBS[h].zone === this.def.id);
+    for (const id of ids) {
+      const def = HERBS[id], col = new THREE.Color(ITEMS[id].color);
+      const petal = new THREE.MeshLambertMaterial({ color: col, emissive: col.clone().multiplyScalar(0.5) });
+      const stem = new THREE.MeshLambertMaterial({ color: 0x4a7a3a });
+      this.disposables.push(petal, stem);
+      let placed = 0;
+      for (let k = 0; k < 900 && placed < 6; k++) {
+        const x = (r() - 0.5) * PLAY * 1.8, z = (r() - 0.5) * PLAY * 1.8, y = t.height(x, z);
+        if (edgeDist(x, z) > 0.95 || Math.hypot(x - t.town.x, z - t.town.z) < TOWN_R + 26 || t.pathAt(x, z) > 0.5) continue;
+        if (def.water ? !(y > WATER_Y + 0.05 && y < WATER_Y + 0.7) : !(y > WATER_Y + 1 && t.normal(x, z, _p).y > 0.85)) continue;
+        if (this.herbs.some((h) => Math.hypot(h.pos.x - x, h.pos.z - z) < 14)) continue;
+        const g = new THREE.Group();
+        const n = def.shape === 'mushroom' ? 3 : 5;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * 6.28 + r(), d = i === 0 ? 0 : 0.14 + r() * 0.12, hgt = def.shape === 'mushroom' ? 0.16 + r() * 0.12 : def.shape === 'flower' ? 0.45 + r() * 0.25 : 0.28 + r() * 0.15;
+          const st = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.02, hgt, 5), def.shape === 'mushroom' ? new THREE.MeshLambertMaterial({ color: 0xf0e6d0 }) : stem);
+          st.position.set(Math.cos(a) * d, hgt / 2, Math.sin(a) * d);
+          const top = new THREE.Mesh(def.shape === 'mushroom' ? new THREE.SphereGeometry(0.1 + r() * 0.05, 8, 5, 0, 6.3, 0, 1.6) : def.shape === 'flower' ? new THREE.ConeGeometry(0.07, 0.16, 6) : new THREE.SphereGeometry(0.09, 6, 4), petal);
+          top.position.set(st.position.x, hgt + (def.shape === 'leaf' ? 0 : 0.02), st.position.z);
+          if (def.shape === 'leaf') top.scale.set(1.5, 0.5, 0.9), top.rotation.set(0.5, a, 0.4);
+          if (def.shape === 'flower') top.rotation.x = Math.PI;
+          g.add(st, top);
+        }
+        g.traverse((o) => { o.castShadow = true; });
+        g.scale.setScalar(2.1);
+        g.position.set(x, y - 0.02, z);
+        this.group.add(g);
+        this.herbs.push({ id, pos: new THREE.Vector3(x, y, z), obj: g, taken: false });
+        placed++;
+      }
+    }
+  }
+  refreshHerbs(taken: number[]) {
+    this.herbs.forEach((h, i) => { h.taken = taken.includes(i); h.obj.visible = !h.taken; });
+  }
+  /** An iron cauldron on a tripod over embers, for brewing. */
+  private cauldron(x: number, z: number) {
+    const t = this.terrain, y = t.height(x, z);
+    const g = new THREE.Group();
+    const iron = new THREE.MeshLambertMaterial({ color: 0x2c2c32 }), brew = new THREE.MeshLambertMaterial({ color: 0x5ac86a, emissive: 0x1a5a2a });
+    const pot = new THREE.Mesh(new THREE.SphereGeometry(0.62, 14, 10, 0, 6.3, 1.0, 2.2), iron); pot.position.y = 0.95; pot.material.side = THREE.DoubleSide;
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.06, 6, 18), iron); rim.rotation.x = Math.PI / 2; rim.position.y = 1.28;
+    const liq = new THREE.Mesh(new THREE.CircleGeometry(0.52, 18), brew); liq.rotation.x = -Math.PI / 2; liq.position.y = 1.22;
+    g.add(pot, rim, liq);
+    for (let i = 0; i < 3; i++) { const a = (i / 3) * 6.28, leg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.3, 5), iron); leg.position.set(Math.cos(a) * 0.5, 1.05, Math.sin(a) * 0.5); leg.rotation.set(Math.sin(a) * 0.36, 0, -Math.cos(a) * 0.36); g.add(leg); }
+    g.traverse((o) => { o.castShadow = true; });
+    g.position.set(x, y, z);
+    this.group.add(g);
+    this.disposables.push(iron, brew);
+    this.addCollider({ x, z, r: 0.8, h: 2, kind: 'prop' });
+    const pos = new THREE.Vector3(x, y, z);
+    this.fire(new THREE.Vector3(x, y - 0.25, z));
+    this.stations.push({ kind: 'cauldron', pos, radius: 2.6, prompt: 'Brew at the cauldron', name: 'Cauldron' });
+    this.marker('cauldron', pos, 3.0);
   }
 
   private noticeBoard(x: number, z: number, ry: number) {
@@ -811,6 +874,7 @@ export class Zone {
       this.addCollider({ x, z, r: 0.9, h: 3, kind: 'prop' });
       station('board', 196, 7.6, 2.6, 'Read the notice board', 'Notice Board');
     }
+    { const [x, z] = at(52, 17.5); this.cauldron(x, z); }
     // town campfire
     {
       const [x, z] = at(150, 12);

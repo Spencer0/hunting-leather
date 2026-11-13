@@ -22,6 +22,11 @@ export interface Save {
   day: number;
   kills: Record<string, number>;
   fish?: Record<string, number>;
+  buffs?: Record<string, number>; // essence -> seconds left
+  lore?: Record<string, string[]>; // herb -> discovered essences
+  brewed?: Record<string, number>; // potion -> times brewed
+  picked?: Record<string, { day: number; idx: number[] }>;
+  hotbar?: string[]; // 'w0'|'w1'|'w2' (weapon slots) or an item key
   bounty?: Record<string, number>;
   legends: string[];
   contracts: Contract[]; contractSeq: number; boardDay: Record<string, number>;
@@ -31,8 +36,8 @@ export interface Save {
   settings?: never;
 }
 
-export interface Settings { master: number; music: number; sfx: number; sens: number; invertY: boolean; quality: number; shake: boolean }
-export const settings: Settings = { master: 0.8, music: 0.6, sfx: 0.9, sens: 1, invertY: false, quality: 2, shake: true };
+export interface Settings { master: number; music: number; sfx: number; sens: number; invertY: boolean; quality: number; shake: boolean; hotkeys: string[] }
+export const settings: Settings = { master: 0.8, music: 0.6, sfx: 0.9, sens: 1, invertY: false, quality: 2, shake: true, hotkeys: ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'] };
 
 const SKEY = 'hidebound.settings';
 const SAVEKEY = (i: number) => `hidebound.save.${i}`;
@@ -47,7 +52,8 @@ export function saveSettings() {
 export function newSave(name: string): Save {
   return {
     v: 1, name, zone: 'greenhollow', level: 1, xp: 0, perkPoints: 0, perks: {}, gold: 25, hp: 100,
-    inv: { arrow: 20, knife: 6, salt: 4, thread: 4, tonic: 1 },
+    inv: { arrow: 20, knife: 6, salt: 4, thread: 4, tonic: 1, jerky: 2 },
+    hotbar: ['w0', 'w1', 'w2', 'tonic', 'jerky'], buffs: {}, lore: {}, brewed: {}, picked: {},
     gear: { pack: 'pack0', quiver: 'quiver0', armor: 'armor0', boots: 'boots0', bracer: 'bracer0', knife: 'knife0' },
     weapons: ['bow1'], slots: ['bow1', '', 'thr1'], active: 0, time: 8, day: 1, kills: {}, legends: [],
     contracts: [], contractSeq: 1, boardDay: {}, board: {}, flags: {},
@@ -65,6 +71,7 @@ export function readSlot(i: number): Save | null {
     if (!raw) return null;
     const s = JSON.parse(raw) as Save;
     if (s.v !== 1) return null;
+    s.hotbar = s.hotbar ?? ['w0', 'w1', 'w2', 'tonic', ''];
     // older saves stored crafted goods without a grade
     for (const k of Object.keys(s.inv)) if (!k.includes(':') && ITEMS[k]?.cat === 'goods') { s.inv[k + ':1'] = (s.inv[k + ':1'] ?? 0) + s.inv[k]; delete s.inv[k]; }
     return s;
@@ -84,8 +91,9 @@ export const maxHp = () => 100 + (S.level - 1) * 6 + perk('hardy') * 20;
 export const maxStamina = () => 100 + (S.level - 1) * 3 + perk('hardy') * 12;
 export const capacity = () => (gear('pack').capacity ?? 28) + perk('mule') * 12;
 export const ammoCap = () => gear('quiver').ammo ?? 20;
-export const defense = () => gear('armor').defense ?? 0;
-export const stealthMult = () => (1 - (gear('boots').stealth ?? 0)) * (1 - perk('lightstep') * 0.15);
+export const buff = (e: string) => (S.buffs?.[e] ?? 0) > 0;
+export const defense = () => Math.min(0.8, (gear('armor').defense ?? 0) + (buff('ironhide') ? 0.25 : 0));
+export const stealthMult = () => (1 - (gear('boots').stealth ?? 0)) * (1 - perk('lightstep') * 0.15) * (buff('stillness') ? 0.5 : 1);
 export const drawMult = () => 1 / (1 + (gear('bracer').draw ?? 0));
 export const skinBonus = () => (gear('knife').skin ?? 0) + perk('skinner') * 0.12;
 export const sellMult = () => 1 + perk('haggler') * 0.06;
@@ -151,6 +159,9 @@ export function sellValue(key: string, zoneId: string): number {
 export function buyPrice(id: string): number {
   return Math.max(1, Math.round((ITEMS[id].buy ?? ITEMS[id].value * 2) * buyMult()));
 }
+export const hotbar = () => (S.hotbar ??= ['w0', 'w1', 'w2', 'tonic', '']);
+export const usable = (key: string) => /^w[012]$/.test(key) || key === 'tonic' || key === 'jerky' || ITEMS[key]?.cat === 'potion';
+export const keyLabel = (code: string) => code.replace(/^Digit|^Key|^Numpad/, '').replace('ArrowUp', '↑').replace('ArrowDown', '↓').replace('ArrowLeft', '←').replace('ArrowRight', '→');
 export const zoneIndex = (z: string) => ZONE_ORDER.indexOf(z);
 
 /** Returns number of levels gained. */

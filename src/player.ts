@@ -6,7 +6,7 @@ import { G } from './ctx';
 import { WEAPONS, type WeaponDef } from './data';
 import { GRAV, Projectiles } from './projectiles';
 import { input, rumble } from './input';
-import { S, activeWeapon, capacity, count, defense, drawMult, gear, maxHp, maxStamina, perk, settings, stealthMult, totalWeight } from './state';
+import { S, activeWeapon, buff, capacity, count, defense, drawMult, gear, maxHp, maxStamina, perk, settings, stealthMult, totalWeight } from './state';
 import { WATER_Y, edgeDist } from './terrain';
 import { angleDiff, clamp, damp, dampAngle, lerp } from './util';
 import { CHAR_SCALE } from './world';
@@ -58,6 +58,7 @@ export class Player {
   private dagger: THREE.Object3D;
   private back = new THREE.Group();
   private backKey = '';
+  private idleT = 0;
   private cineOn = false;
 
   constructor() {
@@ -275,7 +276,9 @@ export class Player {
 
     // ----- weapon switching -----
     if (control && !this.busy && !this.drawing && this.throwT < 0) {
-      let sl = input.slot();
+      let sl = -1;
+      const hb = input.hotbar();
+      if (hb >= 0) G.game.useHotbar(hb);
       if (input.nextWeapon() || input.prevWeapon()) {
         const dirn = input.prevWeapon() ? -1 : 1;
         for (let k = 1; k <= 3; k++) { const c = (S.active + dirn * k + 3) % 3; if (S.slots[c]) { sl = c; break; } }
@@ -295,10 +298,15 @@ export class Player {
     this.aiming = wantAim;
     const over = totalWeight() > capacity();
     const depth = WATER_Y - t.height(this.pos.x, this.pos.z);
-    let speed = 5.0;
+    let speed = 5.0 * (buff('swift') ? 1.2 : 1);
+    this.idleT = this.moving ? 0 : this.idleT + dt;
     const sprinting = control && input.sprint() && this.moving && !this.crouching && !wantAim && this.stamina > 1 && !over && this.reload <= 0 && my > -0.2;
-    if (sprinting) { speed = 7.6; this.stamina -= dt * 13 * (1 - (gear('boots').stamina ?? 0)); }
-    else this.stamina = Math.min(maxStamina(), this.stamina + dt * (this.drawing ? 0 : this.moving ? 9 : 16));
+    if (sprinting) { speed = 7.6 * (buff('swift') ? 1.2 : 1); this.stamina -= dt * 13 * (1 - (gear('boots').stamina ?? 0)); }
+    else {
+      // catching your breath: standing still (and especially crouching) recovers stamina fast
+      const rest = this.idleT > 0.4 ? (this.crouching ? 46 : 30) : this.moving ? 11 : 18;
+      this.stamina = Math.min(maxStamina(), this.stamina + dt * (this.drawing ? 0 : rest) * (buff('vigor') ? 2 : 1));
+    }
     if (this.crouching) speed = 2.0;
     else if (wantAim || this.reload > 0) speed = 2.3;
     if (over) speed *= 0.5;
@@ -581,7 +589,7 @@ export class Player {
     const zoom = aim ? (w?.kind === 'crossbow' ? 36 : w?.kind === 'bow' ? 44 - this.draw * 6 : 50) : 58;
     this.fov = damp(this.fov, zoom, 9, dt);
     if (Math.abs(cam.fov - this.fov) > 0.01) { cam.fov = this.fov; cam.updateProjectionMatrix(); }
-    const sw = this.sway * (1 - perk('steady') * 0.25);
+    const sw = this.sway * (1 - perk('steady') * 0.25) * (buff('keen') ? 0.15 : 1);
     const yaw = this.camYaw + Math.sin(G.time * 2.3) * 0.012 * sw, pitch = this.camPitch + Math.sin(G.time * 3.1 + 1) * 0.014 * sw;
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const fwd = _f.set(-Math.sin(yaw) * cp, -sp, -Math.cos(yaw) * cp);

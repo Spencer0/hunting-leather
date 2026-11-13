@@ -175,7 +175,7 @@ export const ZONES: Record<string, ZoneDef> = {
 };
 export const ZONE_ORDER = ['greenhollow', 'amberwood', 'sunscar', 'frostfang'];
 
-export type ItemCat = 'hide' | 'leather' | 'fur' | 'goods' | 'trophy' | 'meat' | 'fish' | 'ammo' | 'supply' | 'gear' | 'weapon';
+export type ItemCat = 'hide' | 'leather' | 'fur' | 'goods' | 'trophy' | 'meat' | 'fish' | 'herb' | 'potion' | 'ammo' | 'supply' | 'gear' | 'weapon';
 export interface ItemDef {
   id: string;
   name: string;
@@ -234,6 +234,27 @@ item('bark', 'Oak-bark Liquor', 'supply', 7, 0.3, 'tonic', '#8a5a2a', 'A slow, r
 item('thread', 'Waxed Thread', 'supply', 2, 0.05, 'thread', '#e8d090', 'Holds leatherwork together.', 5);
 item('rivets', 'Brass Rivets', 'supply', 6, 0.1, 'rivet', '#e0b040', 'For work that has to last.', 14, 1);
 item('tonic', 'Hunter’s Tonic', 'supply', 12, 0.3, 'tonic', '#e05858', 'Restores 60 health. Tastes like regret.', 30);
+item('jerky', 'Trail Jerky', 'supply', 3, 0.1, 'meat', '#8a4a32', 'Chew for a quick 60 stamina.', 8);
+// Herbs (alchemy ingredients) — their essences are hidden until discovered at a cauldron
+item('h_mint', 'Meadowmint', 'herb', 4, 0.05, 'herb', '#6ac86a', 'Cool and sharp. Grows in open meadow.');
+item('h_hart', 'Hartstongue', 'herb', 5, 0.05, 'herb', '#3f9a5a', 'A broad glossy fern leaf.');
+item('h_fox', 'Foxglove', 'herb', 6, 0.05, 'herb', '#c86ad8', 'Purple bells on a tall stalk.');
+item('h_cress', 'Brookcress', 'herb', 5, 0.05, 'herb', '#8ad8b0', 'Only grows with its feet wet.');
+item('h_cap', 'Amber Cap', 'herb', 8, 0.05, 'mushroom', '#e09030', 'A fat orange mushroom from the leaf litter.');
+item('h_ember', 'Emberleaf', 'herb', 8, 0.05, 'herb', '#e0502a', 'Red leaves that are warm to hold.');
+item('h_witch', 'Witchroot', 'herb', 9, 0.05, 'herb', '#7a5ab0', 'A twisted violet root. Smells of rain.');
+item('h_thistle', 'Sunthistle', 'herb', 11, 0.05, 'herb', '#f0c030', 'Spiny gold flower of the dry steppe.');
+item('h_dust', 'Dustbloom', 'herb', 11, 0.05, 'herb', '#e8a8b8', 'Pale pink petals that never wilt.');
+item('h_frost', 'Frostbell', 'herb', 14, 0.05, 'herb', '#a8d8f8', 'Blue-white bells that ring faintly in the wind.');
+item('h_moss', 'Snowmoss', 'herb', 14, 0.05, 'mushroom', '#d8f0e0', 'Soft pale moss from under the drifts.');
+// Potions (brewed)
+item('p_vigor', 'Vigor Draught', 'potion', 40, 0.2, 'tonic', '#6ac86a', 'Restores 70 stamina; stamina recovers twice as fast for 90s.');
+item('p_mending', 'Mending Salve', 'potion', 45, 0.2, 'tonic', '#e05858', 'Heals 70 health over 20s.');
+item('p_stillness', 'Stillness Tincture', 'potion', 55, 0.2, 'tonic', '#7a5ab0', 'Animals notice you far less for 120s.');
+item('p_keen', 'Keen-eye Drops', 'potion', 55, 0.2, 'tonic', '#f0c030', 'Rock-steady aim and harder vital hits for 120s.');
+item('p_swift', 'Swiftfoot Tonic', 'potion', 50, 0.2, 'tonic', '#e0902a', 'Move 20% faster for 90s.');
+item('p_ironhide', 'Ironhide Brew', 'potion', 60, 0.2, 'tonic', '#8a94a0', 'Take 25% less damage for 120s.');
+item('p_angler', "Angler's Luck", 'potion', 50, 0.2, 'tonic', '#4aa8d8', 'Fish bite sooner and rare fish are likelier for 5 minutes.');
 item('rod', 'Fishing Pole', 'supply', 20, 1, 'rod', '#a8743c', 'Cast it from any lake shore.', 60);
 item('bait', 'Bait', 'supply', 1, 0.05, 'bait', '#d87a8a', 'One wriggling worm per cast.', 3);
 // Fish: [common, uncommon, rare] per region
@@ -261,6 +282,22 @@ item('g_saddle', 'Steppe Saddle', 'goods', 940, 6, 'saddle', '#5a3a26', 'Heavy-l
 item('g_drum', 'War Drum', 'goods', 700, 4, 'drum', '#5a3a26', 'Stretched heavy hide over a horn-pegged frame.');
 item('g_mantle', 'Royal Mantle', 'goods', 1400, 3, 'cloak', '#f4fbff', 'Fit for a throne room. Almost a shame to sell.');
 export const ITEMS = I;
+export type Essence = 'vigor' | 'mending' | 'stillness' | 'keen' | 'swift' | 'ironhide' | 'angler';
+export const ESSENCES: Record<Essence, { name: string; potion: string; dur: number; color: string }> = {
+  vigor: { name: 'Vigor', potion: 'p_vigor', dur: 90, color: '#6ac86a' }, mending: { name: 'Mending', potion: 'p_mending', dur: 20, color: '#e05858' },
+  stillness: { name: 'Stillness', potion: 'p_stillness', dur: 120, color: '#9a7ad0' }, keen: { name: 'Keen Eye', potion: 'p_keen', dur: 120, color: '#f0c030' },
+  swift: { name: 'Swiftness', potion: 'p_swift', dur: 90, color: '#e0902a' }, ironhide: { name: 'Ironhide', potion: 'p_ironhide', dur: 120, color: '#9aa4b0' },
+  angler: { name: 'Angler', potion: 'p_angler', dur: 300, color: '#4aa8d8' },
+};
+export interface HerbDef { zone: string; ess: [Essence, Essence]; shape: 'flower' | 'leaf' | 'mushroom'; water?: boolean }
+export const HERBS: Record<string, HerbDef> = {
+  h_mint: { zone: 'greenhollow', ess: ['vigor', 'mending'], shape: 'leaf' }, h_hart: { zone: 'greenhollow', ess: ['vigor', 'keen'], shape: 'leaf' },
+  h_fox: { zone: 'greenhollow', ess: ['keen', 'swift'], shape: 'flower' }, h_cress: { zone: 'greenhollow', ess: ['mending', 'angler'], shape: 'leaf', water: true },
+  h_cap: { zone: 'amberwood', ess: ['stillness', 'ironhide'], shape: 'mushroom' }, h_ember: { zone: 'amberwood', ess: ['vigor', 'swift'], shape: 'leaf' },
+  h_witch: { zone: 'amberwood', ess: ['stillness', 'keen'], shape: 'flower' },
+  h_thistle: { zone: 'sunscar', ess: ['swift', 'ironhide'], shape: 'flower' }, h_dust: { zone: 'sunscar', ess: ['keen', 'angler'], shape: 'flower' },
+  h_frost: { zone: 'frostfang', ess: ['mending', 'ironhide'], shape: 'flower' }, h_moss: { zone: 'frostfang', ess: ['vigor', 'stillness'], shape: 'mushroom' },
+};
 export const FISH: Record<string, [string, string, string]> = {
   greenhollow: ['f_trout', 'f_perch', 'f_catfish'], amberwood: ['f_carp', 'f_pike', 'f_leafscale'],
   sunscar: ['f_barbel', 'f_sunfish', 'f_koi'], frostfang: ['f_char', 'f_salmon', 'f_sturgeon'],
@@ -419,6 +456,8 @@ export const TIPS = [
   'Roast game meat at any campfire to restore health in the field.',
   'Buy a fishing pole and bait, then cast from any lake shore. Rare fish fight harder.',
   'Rusthaven’s fishmonger pays the best prices for fish; its huntmaster pays bounties on wolves.',
+  'Gather herbs in the wild and stir two or three together at a town cauldron. Herbs that share a hidden essence make a potion.',
+  'Out of breath? Stand still or crouch to recover stamina quickly, or chew some jerky.',
   'Press F to slash with your knife. It staggers anything that gets too close.',
   'Nail the timing at the tanning bench for extra leather, and at the stitching for Fine goods.',
   'A heavier pack lets you stay out longer. Craft one at the tanner’s bench.',

@@ -3,12 +3,13 @@ import * as THREE from 'three';
 import type { Animal } from './animals';
 import { audio } from './audio';
 import { G } from './ctx';
-import { GEAR, GOODS_QUALITY, ITEMS, MAX_LEVEL, PERKS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, TIPS, WEAPONS, ZONES, ZONE_ORDER, gridKey, patternCells, xpForLevel, type GearSlot, type RecipeDef, type WeaponDef } from './data';
+import { ESSENCES, FISH, GEAR, GOODS_QUALITY, HERBS, ITEMS, type Essence, MAX_LEVEL, PERKS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, TIPS, WEAPONS, ZONES, ZONE_ORDER, gridKey, patternCells, xpForLevel, type GearSlot, type RecipeDef, type WeaponDef } from './data';
+import { CauldronView } from './alchemy';
 import { Fishing, type FishOpts } from './fishing';
 import { Minigame, type MiniOpts } from './minigame';
 import { icon } from './icons';
 import { input, lockPointer, locked, unlockPointer, usingPad } from './input';
-import { RANK_TITLES, S, activeWeapon, addItem, ammoCap, buyPrice, canBuyPerk, capacity, count, countItem, deleteSlot, maxHp, maxStamina, perk, readSlot, saveSettings, sellValue, settings, splitKey, totalWeight, zoneIndex, type Save } from './state';
+import { RANK_TITLES, S, hotbar, keyLabel, usable, activeWeapon, addItem, ammoCap, buyPrice, canBuyPerk, capacity, count, countItem, deleteSlot, maxHp, maxStamina, perk, readSlot, saveSettings, sellValue, settings, splitKey, totalWeight, zoneIndex, type Save } from './state';
 import { MAP_SPAN } from './terrain';
 import { clamp, fmtTime, pick } from './util';
 import type { StationKind } from './world';
@@ -43,7 +44,7 @@ export class UI {
       <div id="status" class="hud-box"><div id="rank">1<small>Greenhorn</small></div><div class="bars">
         <div class="statline"><span id="hpt"></span><span class="wt" id="wt"></span><span class="coin" id="gold"></span></div>
         <div class="bar hp"><i></i></div><div class="bar st"><i></i></div><div class="bar xp"><i></i></div></div></div>
-      <div id="weapons" class="hud-box"></div>
+      <div id="buffs"></div><div id="weapons" class="hud-box"></div>
       <canvas id="cross" width="160" height="160"></canvas><div id="hitm"></div>
       <div id="clicker" class="hud-box hidden">Click to look around</div>
       <div id="prompt" class="hud-box hidden"></div><div id="toasts"></div><div id="hint" class="hud-box off"></div>
@@ -53,7 +54,7 @@ export class UI {
     this.root.append(this.fadeEl);
     const q = (s: string) => this.hud.querySelector(s) as HTMLElement;
     this.promptEl = q('#prompt'); this.hintEl = q('#hint'); this.bannerEl = q('#banner'); this.toastsEl = q('#toasts'); this.dmgEl = q('#dmg'); this.bossEl = q('#boss');
-    for (const id of ['clicker', 'objective', 'eye', 'rank', 'hpt', 'gold', 'wt', 'weapons', 'clock', 'lowhp', 'hurt', 'hitm', 'cross']) this.els[id] = q('#' + id);
+    for (const id of ['buffs', 'clicker', 'objective', 'eye', 'rank', 'hpt', 'gold', 'wt', 'weapons', 'clock', 'lowhp', 'hurt', 'hitm', 'cross']) this.els[id] = q('#' + id);
     this.mini = (q('#mini canvas') as HTMLCanvasElement).getContext('2d')!;
     this.comp = (q('#compass canvas') as HTMLCanvasElement).getContext('2d')!;
     this.cross = (q('#cross') as HTMLCanvasElement).getContext('2d')!;
@@ -118,6 +119,19 @@ export class UI {
   }
 
   // ---------- HUD ----------
+  /** One hotbar slot as HTML (HUD and journal share it). */
+  private hotCell(en: string, i: number, hud: boolean): string {
+    const key = `<span class="key">${keyLabel(settings.hotkeys[i])}</span>`;
+    if (/^w[012]$/.test(en)) {
+      const n = +en[1], id = S.slots[n];
+      if (!id) return `<div class="wslot empty">${key}${icon(['bow', 'crossbow', 'knife'][n], '#888', 44)}</div>`;
+      const wd = WEAPONS[id], c = count(wd.ammo);
+      return `<div class="wslot ${n === S.active ? 'on' : ''}">${key}${icon(wd.kind === 'bow' ? 'bow' : wd.kind === 'crossbow' ? 'crossbow' : ITEMS[wd.ammo].icon, wd.color, 46)}<span class="ammo ${c <= 3 ? 'low' : ''}">${c}</span>${hud && wd.kind === 'crossbow' && n === S.active ? '<div class="rl"><i></i></div>' : ''}</div>`;
+    }
+    if (!en || !ITEMS[en]) return `<div class="wslot empty">${key}</div>`;
+    const c = count(en);
+    return `<div class="wslot item ${c ? '' : 'out'}">${key}${itemIcon(en, 44)}<span class="ammo ${c ? '' : 'low'}">${c}</span></div>`;
+  }
   private set(key: string, val: string | number, fn: (v: string) => void) { if (this.cache[key] !== val) { this.cache[key] = val; fn(String(val)); } }
   update(dt: number) {
     const p = G.player, e = this.els;
@@ -137,15 +151,14 @@ export class UI {
     this.set('obj', G.game.objective() + (S.perkPoints ? `|${S.perkPoints}` : ''), () => { e.objective.querySelector('span')!.innerHTML = G.game.objective() + (S.perkPoints ? `<br><span style="color:#ffe070">★ Skill point ready — Tab</span>` : ''); });
     this.set('clock', `${Math.floor(S.time * 6)}|${G.env.night > 0.5}`, () => { e.clock.innerHTML = `${icon(G.env.night > 0.5 ? 'moon' : 'sun', '#ffd866', 18)} ${fmtTime(S.time)}`; });
     e.lowhp.style.opacity = String(hp < mh * 0.3 ? 0.5 + Math.sin(G.time * 5) * 0.3 : 0);
-    // weapons
-    const act = activeWeapon();
-    const wkey = S.slots.map((id, i) => `${id}:${id ? count(WEAPONS[id].ammo) : 0}:${i === S.active}`).join('|') + (act?.kind === 'crossbow' ? (p.loaded ? 'L' : 'U') : '');
-    this.set('weap', wkey, () => {
-      e.weapons.innerHTML = S.slots.map((id, i) => {
-        if (!id) return `<div class="wslot empty"><span class="key">${i + 1}</span>${icon(['bow', 'crossbow', 'knife'][i], '#888', 44)}</div>`;
-        const wd = WEAPONS[id], n = count(wd.ammo);
-        return `<div class="wslot ${i === S.active ? 'on' : ''}"><span class="key">${i + 1}</span>${icon(wd.kind === 'bow' ? 'bow' : wd.kind === 'crossbow' ? 'crossbow' : ITEMS[wd.ammo].icon, wd.color, 48)}<span class="ammo ${n <= 3 ? 'low' : ''}">${n}</span>${wd.kind === 'crossbow' && i === S.active ? '<div class="rl"><i></i></div>' : ''}</div>`;
-      }).join('');
+    // hotbar
+    const act = activeWeapon(), hbar = hotbar();
+    const wkey = hbar.map((en) => { const ws = /^w[012]$/.test(en) ? S.slots[+en[1]] : ''; return /^w[012]$/.test(en) ? `${ws}:${ws ? count(WEAPONS[ws].ammo) : 0}:${+en[1] === S.active}` : `${en}:${count(en)}`; }).join('|') + settings.hotkeys.join() + (act?.kind === 'crossbow' ? (p.loaded ? 'L' : 'U') : '');
+    this.set('weap', wkey, () => { e.weapons.innerHTML = hbar.map((en, i) => this.hotCell(en, i, true)).join(''); });
+    // potion effects
+    const bk = Object.entries(S.buffs ?? {}).filter(([, v]) => v > 0);
+    this.set('buffs', bk.map(([k, v]) => `${k}${Math.ceil(v)}`).join(), () => {
+      e.buffs.innerHTML = bk.map(([k, v]) => `<div class="buff" style="border-color:${ESSENCES[k as Essence].color}">${icon('tonic', ESSENCES[k as Essence].color, 24)}<b>${Math.ceil(v)}s</b></div>`).join('');
     });
     if (act?.kind === 'crossbow') { const rl = e.weapons.querySelector('.rl i') as HTMLElement | null; if (rl) rl.style.width = p.loaded ? '100%' : p.reload > 0 ? `${(1 - p.reload / (act.time + 0.35)) * 100}%` : '0%'; }
     // crosshair
@@ -282,7 +295,24 @@ export class UI {
     this.panel = this.mg.el;
     this.root.append(this.mg.el);
   }
-  tick(dt: number) { this.mg?.tick(dt, input.uiAccept() || input.keyHit('Space') || input.keyHit('KeyE')); }
+  private cv: CauldronView | null = null;
+  private hover = '';
+  tick(dt: number) {
+    this.mg?.tick(dt, input.uiAccept() || input.keyHit('Space') || input.keyHit('KeyE'));
+    if (this.kind === 'cauldron') this.cv?.tick(dt);
+    if (this.kind === 'journal' && this.tab === 'Pack' && this.hover) {
+      const i = input.hotbar();
+      if (i >= 0) this.assign(i, this.hover);
+    }
+  }
+  private assign(i: number, key: string) {
+    if (!usable(key)) { this.toast('Only weapons, potions and food go on the hotbar', 'warn'); audio.play('error'); return; }
+    const hb = hotbar(), old = hb.indexOf(key);
+    if (old >= 0) hb[old] = hb[i]; // swap rather than duplicate
+    hb[i] = key;
+    audio.play('equip');
+    this.render();
+  }
   open(kind: PanelKind, tab = '') {
     this.close(true);
     this.kind = kind; this.isOpen = true; this.onClose = null;
@@ -339,6 +369,7 @@ export class UI {
       case 'wagon': return this.renderWagon();
       case 'campfire': return this.renderCamp();
       case 'bedroll': return this.renderBedroll();
+      case 'cauldron': return this.renderCauldron();
       case 'fishmonger': return this.renderFishmonger();
       case 'lodge': return this.renderLodge();
       case 'journal': return this.renderJournal();
@@ -503,6 +534,41 @@ export class UI {
     body.append(st);
   }
 
+  private essTags(h: string) {
+    const known = S.lore?.[h] ?? [];
+    return HERBS[h].ess.map((e) => (known.includes(e) ? `<span class="tag" style="background:${ESSENCES[e].color};color:#14100c">${ESSENCES[e].name}</span>` : '<span class="tag q0">?</span>')).join(' ');
+  }
+  private renderCauldron() {
+    const { body } = this.frame('Cauldron', []);
+    if (!this.cv) this.cv = new CauldronView((herbs) => {
+      const r = G.game.brew(herbs);
+      if (!r.made.length) return { good: false, lines: ['Grey sludge…', 'These herbs share no essence.'] };
+      return { good: true, lines: [r.made.map(([p, n]) => `${ITEMS[p].name}${n > 1 ? ' ×' + n : ''}`).join(' + '), ...r.learned.map(([h, e]) => `${ITEMS[h].name} holds ${ESSENCES[e].name}`), ...(r.firsts.length ? ['New recipe discovered!'] : [])] };
+    }, () => this.render());
+    const cv = this.cv;
+    const shelf = $('<div class="col book"><h3 class="sec">Your herbs</h3></div>');
+    const herbs = Object.keys(HERBS).filter((h) => count(h) > 0);
+    if (!herbs.length) shelf.append($('<p class="muted">No herbs. Look for glinting plants out in the wild.</p>'));
+    for (const h of herbs) {
+      const left = count(h) - cv.herbs.filter((x) => x === h).length;
+      const b = $(`<button class="rec" ${left <= 0 ? 'disabled' : ''}>${itemIcon(h, 30)}<span>${ITEMS[h].name}<br><small>${this.essTags(h)}</small></span><em>${left}</em></button>`);
+      b.addEventListener('click', () => cv.add(h));
+      shelf.append(b);
+    }
+    const mid = $('<div class="benchmid" style="align-items:center"></div>');
+    mid.append(cv.el);
+    const prev = G.game.brewPreview(cv.herbs);
+    mid.append($(`<div class="say" style="margin:0;width:100%;text-align:center">${cv.herbs.length < 2 ? 'Click herbs to drop them in. Two or three that share an essence make a potion.' : prev.length ? `You expect: <b style="display:inline">${prev.map((e) => ITEMS[ESSENCES[e].potion].name).join(' + ')}</b>` : 'You have never tried this mix. <b style="display:inline">Stir and see.</b>'}</div>`));
+    const notes = $('<div class="col side"><h3 class="sec">Potions known</h3></div>');
+    const made = (Object.keys(ESSENCES) as Essence[]).filter((e) => S.brewed?.[ESSENCES[e].potion]);
+    if (!made.length) notes.append($('<p class="muted">Nothing yet.</p>'));
+    for (const e of made) {
+      const hs = Object.keys(HERBS).filter((h) => S.lore?.[h]?.includes(e)).map((h) => ITEMS[h].name);
+      notes.append($(`<div class="kv" style="display:block"><b>${ITEMS[ESSENCES[e].potion].name}</b> <span class="muted">×${count(ESSENCES[e].potion)}</span><br><small>${hs.join(' · ')}</small></div>`));
+    }
+    body.classList.add('bench');
+    body.append(shelf, mid, notes);
+  }
   private renderFishmonger() {
     const { body } = this.frame(this.npcName('fishmonger'), []);
     const col = $('<div class="col"></div>');
@@ -569,7 +635,8 @@ export class UI {
   }
 
   private renderJournal() {
-    const { body } = this.frame('Journal', ['Pack', 'Skills', 'Map']);
+    const { body } = this.frame('Journal', ['Pack', 'Skills', 'Map', 'Codex']);
+    this.hover = '';
     const col = $('<div class="col"></div>');
     body.append(col);
     if (this.tab === 'Pack') {
@@ -584,6 +651,7 @@ export class UI {
           if (this.sel === 'w' + i && owned.length > 1) G.game.equipWeapon(owned[(owned.indexOf(S.slots[i]) + 1) % owned.length]);
           this.sel = 'w' + i; audio.play('ui_move'); this.render();
         });
+        this.dragSrc(c, 'w' + i);
         load.append(c);
       });
       for (const slot of ['pack', 'quiver', 'armor', 'boots', 'bracer', 'knife'] as GearSlot[]) {
@@ -601,9 +669,19 @@ export class UI {
         const [id, q] = splitKey(k), cat = ITEMS[id].cat;
         const c = $(`<button class="cell ${k === this.sel ? 'sel' : ''}">${itemIcon(k, 46)}${(cat === 'hide' || cat === 'goods') && q !== 1 ? `<i class="qp q${q}"></i>` : ''}<span class="n">${count(k)}</span></button>`);
         c.addEventListener('click', () => { this.sel = k; audio.play('ui_move'); this.render(); });
+        if (usable(k)) this.dragSrc(c, k); else c.addEventListener('mouseenter', () => { this.hover = k; });
         grid.append(c);
       }
-      col.append(load, $(`<h3 class="sec">Pack ${totalWeight()} / ${capacity()}</h3>`), grid);
+      const bar = $('<div class="hotrow"></div>');
+      hotbar().forEach((en, i) => {
+        const c = $(this.hotCell(en, i, false));
+        c.addEventListener('dragover', (ev) => ev.preventDefault());
+        c.addEventListener('drop', (ev) => { ev.preventDefault(); const k = (ev as DragEvent).dataTransfer?.getData('text/plain'); if (k) this.assign(i, k); });
+        c.addEventListener('click', () => { hotbar()[i] = ''; audio.play('ui_back'); this.render(); });
+        bar.append(c);
+      });
+      col.append($('<h3 class="sec">Hotbar <span class="muted" style="float:right;letter-spacing:0;text-transform:none">hover an item and press its key, or drag it here · click a slot to clear</span></h3>'), bar,
+        $('<h3 class="sec">Loadout</h3>'), load, $(`<h3 class="sec">Pack ${totalWeight()} / ${capacity()}</h3>`), grid);
       const sel = this.sel;
       if (sel[0] === 'w' && sel.length === 2) {
         const w = S.slots[+sel[1]] ? WEAPONS[S.slots[+sel[1]]] : null;
@@ -615,10 +693,12 @@ export class UI {
         const [id] = splitKey(sel), it = ITEMS[id];
         side.innerHTML = `<div style="display:flex;gap:10px;align-items:center">${itemIcon(sel, 52)}<h3>${it.name}</h3></div><p>${keyTag(sel)}</p><p>${it.desc}</p>
           <div class="kv"><span>Carried</span><span>${count(sel)}</span></div><div class="kv"><span>Worth here</span><span>${coin(sellValue(sel, S.zone))}</span></div><p></p>`;
-        if (id === 'tonic') side.append(this.btn('Drink', () => { G.game.useTonic(); this.render(); }, '', S.hp >= maxHp()));
+        if (usable(sel)) side.append(this.btn(id === 'jerky' ? 'Eat' : 'Drink', () => { G.game.useItem(sel); this.render(); }));
         if (it.cat !== 'ammo') side.append(this.btn('Discard', () => { addItem(sel, -1); this.render(); }, 'red'));
       } else side.innerHTML = '<p class="muted">Your pack is empty.</p>';
       body.append(side);
+    } else if (this.tab === 'Codex') {
+      this.renderCodex(body, col);
     } else if (this.tab === 'Skills') {
       col.append($(`<h3 class="sec">${S.perkPoints} skill point${S.perkPoints === 1 ? '' : 's'} · Rank ${S.level} ${RANK_TITLES[S.level]}</h3>`));
       for (const p of PERKS) {
@@ -644,6 +724,53 @@ export class UI {
     }
   }
 
+  private dragSrc(c: HTMLElement, key: string) {
+    c.draggable = true;
+    c.addEventListener('dragstart', (ev) => { (ev as DragEvent).dataTransfer?.setData('text/plain', key); });
+    c.addEventListener('mouseenter', () => { this.hover = key; });
+    c.addEventListener('mouseleave', () => { if (this.hover === key) this.hover = ''; });
+  }
+  private codexCat = 'Animals'; private codexSel = '';
+  /** Encyclopedia of everything in the game; things not yet met stay hidden. */
+  private renderCodex(body: HTMLElement, col: HTMLElement) {
+    const cats = ['Animals', 'Fish', 'Herbs', 'Potions', 'Materials', 'Goods', 'Gear', 'Weapons'];
+    const chips = $('<div class="chips"></div>');
+    for (const c of cats) { const b = $(`<button class="chip ${c === this.codexCat ? 'on' : ''}">${c}</button>`); b.addEventListener('click', () => { this.codexCat = c; this.codexSel = ''; audio.play('ui_page'); this.render(); }); chips.append(b); }
+    type Entry = { id: string; ic: string; name: string; known: boolean; html: () => string };
+    const kv = (a: string, b: string | number) => `<div class="kv"><span>${a}</span><span>${b}</span></div>`;
+    const recipeFor = (pred: (r: RecipeDef) => boolean) => {
+      const r = RECIPES.find(pred);
+      if (!r) return '';
+      const cells = patternCells(r.pattern);
+      return `<h3 class="sec" style="margin-top:12px">Pattern · Rank ${r.rank}</h3><div class="minigrid">${cells.map((c) => `<i>${c ? itemIcon(c, 26) : ''}</i>`).join('')}</div>`;
+    };
+    const itemEntry = (id: string, known = true, extra = ''): Entry => { const it = ITEMS[id]; return { id, ic: itemIcon(id, 44), name: it.name, known, html: () => `<p>${it.desc}</p>${kv('Base value', coin(it.value))}${it.buy ? kv('Sold by merchants for', coin(buyPrice(id))) : ''}${kv('Weight', it.cat === 'ammo' ? '—' : it.weight)}${extra}` }; };
+    let list: Entry[] = [];
+    const zoneOf = (pred: (z: string) => boolean) => ZONE_ORDER.filter(pred).map((z) => ZONES[z].name).join(', ');
+    if (this.codexCat === 'Animals') list = Object.values(SPECIES).map((sp) => ({ id: sp.id, ic: icon(sp.legendary ? 'skull' : 'paw', sp.legendary ? '#a050d0' : ITEMS[sp.hide].color, 44), name: sp.name, known: (S.kills[sp.id] ?? 0) > 0,
+      html: () => `<p>${sp.blurb}</p>${kv('Found in', zoneOf((z) => ZONES[z].legendary === sp.id || ZONES[z].spawns.some((s) => s[0] === sp.id)))}${kv('Health', sp.hp)}${kv('Temper', sp.behaviour === 'predator' || sp.behaviour === 'boss' ? 'Attacks on sight' : sp.behaviour === 'defensive' ? 'Charges if provoked' : 'Flees')}${kv('Gives', ITEMS[sp.hide].name)}${sp.trophy ? kv('Trophy', ITEMS[sp.trophy[0]].name) : ''}${kv('Taken', S.kills[sp.id] ?? 0)}` }));
+    else if (this.codexCat === 'Fish') list = ZONE_ORDER.flatMap((z) => FISH[z].map((id, i) => itemEntry(id, !!S.fish?.[id], kv('Waters', ZONES[z].name) + kv('Rarity', ['Common', 'Uncommon', 'Rare'][i]) + kv('Caught', S.fish?.[id] ?? 0))));
+    else if (this.codexCat === 'Herbs') list = Object.keys(HERBS).map((h) => itemEntry(h, count(h) > 0 || !!S.lore?.[h], kv('Grows in', ZONES[HERBS[h].zone].name + (HERBS[h].water ? ' (shorelines)' : '')) + `<h3 class="sec" style="margin-top:12px">Essences</h3><p>${this.essTags(h)}</p>`));
+    else if (this.codexCat === 'Potions') list = (Object.keys(ESSENCES) as Essence[]).map((e) => itemEntry(ESSENCES[e].potion, !!S.brewed?.[ESSENCES[e].potion], kv('Lasts', ESSENCES[e].dur + 's') + `<h3 class="sec" style="margin-top:12px">Known sources</h3><p>${Object.keys(HERBS).filter((h) => S.lore?.[h]?.includes(e)).map((h) => ITEMS[h].name).join(', ') || '—'}</p>`));
+    else if (this.codexCat === 'Materials') list = Object.values(ITEMS).filter((it) => ['hide', 'leather', 'fur', 'trophy', 'meat', 'supply', 'ammo'].includes(it.cat)).map((it) => itemEntry(it.id, true, TANNING[it.id] ? kv('Tans into', `${TANNING[it.id][1]} × ${ITEMS[TANNING[it.id][0]].name}`) : ''));
+    else if (this.codexCat === 'Goods') list = Object.values(ITEMS).filter((it) => it.cat === 'goods').map((it) => itemEntry(it.id, true, recipeFor((r) => r.out.item === it.id)));
+    else if (this.codexCat === 'Gear') list = Object.values(GEAR).filter((g) => g.tier > 0).map((g) => ({ id: g.id, ic: icon(g.icon, g.color, 44), name: g.name, known: true, html: () => `<p>${g.desc}</p>${kv('Slot', g.slot)}${kv('Owned', G.game.ownsGear(g.id) ? 'yes' : 'no')}${recipeFor((r) => r.out.gear === g.id)}` }));
+    else list = Object.values(WEAPONS).map((w) => ({ id: w.id, ic: icon(w.kind === 'bow' ? 'bow' : w.kind === 'crossbow' ? 'crossbow' : ITEMS[w.ammo].icon, w.color, 44), name: w.name, known: true,
+      html: () => `<p>${w.desc}</p>${kv('Damage', w.damage)}${kv(w.kind === 'bow' ? 'Draw' : w.kind === 'crossbow' ? 'Reload' : 'Throw', w.time + 's')}${kv('Speed', w.speed)}${kv('Ammunition', ITEMS[w.ammo].name)}${kv('From', w.kind === 'thrown' ? 'Fletchers (buy the ammunition)' : w.price ? `Fletchers from ${ZONES[ZONE_ORDER[w.zone]].town} · ${w.price} coin` : 'Crafted')}${recipeFor((r) => r.out.weapon === w.id)}` }));
+    const grid = $('<div class="grid"></div>');
+    if (!list.some((e) => e.id === this.codexSel)) this.codexSel = (list.find((e) => e.known) ?? list[0])?.id ?? '';
+    for (const en of list) {
+      const c = $(`<button class="cell ${en.id === this.codexSel ? 'sel' : ''} ${en.known ? '' : 'unk'}" title="${en.known ? en.name : '???'}">${en.known ? en.ic : '<b>?</b>'}</button>`);
+      c.addEventListener('click', () => { this.codexSel = en.id; audio.play('ui_move'); this.render(); });
+      grid.append(c);
+    }
+    const found = list.filter((e) => e.known).length;
+    col.append(chips, $(`<h3 class="sec">${this.codexCat} · ${found} / ${list.length}</h3>`), grid);
+    const cur = list.find((e) => e.id === this.codexSel);
+    const side = $('<div class="col side detail"></div>');
+    side.innerHTML = !cur ? '' : cur.known ? `<div style="display:flex;gap:10px;align-items:center">${cur.ic}<h3>${cur.name}</h3></div>${cur.html()}` : '<h3>???</h3><p class="muted">Not yet discovered.</p>';
+    body.append(side);
+  }
   private renderPause() {
     const { body } = this.frame('Paused', [], true);
     const st = $('<div class="stack" style="flex:1;align-items:center"></div>');
@@ -667,11 +794,26 @@ export class UI {
       $('<p class="muted">Foliage density changes apply the next time a region loads.</p>'));
     body.append(col);
   }
+  private rebinding = -1;
   private renderControls() {
     const { body } = this.frame('Controls', [], true);
-    const rows: [string, string, string][] = [['W A S D', 'Left stick', 'Move'], ['Mouse', 'Right stick', 'Look'], ['Shift', 'L3 / B', 'Sprint'], ['C', 'R3', 'Crouch / sneak'], ['Space', 'A', 'Jump'],
-      ['Right mouse', 'LT', 'Aim'], ['Left mouse', 'RT', 'Draw & loose / fire / throw'], ['1 2 3 · wheel', 'LB / RB', 'Bow · crossbow · thrown'], ['R', '—', 'Span crossbow'], ['F', 'Y', 'Knife slash'], ['E', 'X', 'Interact / skin'], ['H', 'D-pad up', 'Drink tonic'], ['Tab', 'Back', 'Journal'], ['Esc', 'Start', 'Pause']];
-    body.append($(`<div class="col"><div class="keys" style="grid-template-columns:auto auto 1fr"><b>Keyboard</b><b>Gamepad</b><b></b>${rows.map(([k, g, d]) => `<kbd>${k}</kbd><kbd>${g}</kbd><span>${d}</span>`).join('')}</div></div>`));
+    const rows: [string, string, string][] = [['W A S D', 'Left stick', 'Move'], ['Mouse', 'Right stick', 'Look'], ['Shift', 'L3 / B', 'Sprint'], ['C', 'R3', 'Crouch (recovers stamina fastest)'], ['Space', 'A', 'Jump'],
+      ['Right mouse', 'LT', 'Aim'], ['Left mouse', 'RT', 'Draw & loose / fire / throw'], ['Wheel / Q', 'LB / RB', 'Cycle weapons'], ['R', '—', 'Span crossbow'], ['F', 'Y', 'Knife slash'], ['E', 'X', 'Interact / skin / gather / fish'], ['H', 'D-pad up', 'Drink tonic'], ['Tab', 'Back', 'Journal'], ['Esc', 'Start', 'Pause']];
+    const col = $(`<div class="col"><h3 class="sec">Hotbar keys — click to rebind</h3><div class="hotrow"></div><h3 class="sec">Everything else</h3><div class="keys" style="grid-template-columns:auto auto 1fr"><b>Keyboard</b><b>Gamepad</b><b></b>${rows.map(([k, g, d]) => `<kbd>${k}</kbd><kbd>${g}</kbd><span>${d}</span>`).join('')}</div></div>`);
+    const row = col.querySelector('.hotrow')!;
+    settings.hotkeys.forEach((code, i) => {
+      row.append(this.btn(this.rebinding === i ? 'Press a key…' : `Slot ${i + 1}: ${keyLabel(code)}`, () => {
+        this.rebinding = i; this.render();
+        const on = (ev: KeyboardEvent) => {
+          window.removeEventListener('keydown', on, true);
+          ev.preventDefault(); ev.stopImmediatePropagation();
+          if (ev.code !== 'Escape') { const clash = settings.hotkeys.indexOf(ev.code); if (clash >= 0) settings.hotkeys[clash] = settings.hotkeys[i]; settings.hotkeys[i] = ev.code; saveSettings(); }
+          this.rebinding = -1; this.cache.weap = ''; if (this.kind === 'controls') this.render();
+        };
+        window.addEventListener('keydown', on, true);
+      }, this.rebinding === i ? '' : 'alt'));
+    });
+    body.append(col);
   }
 
   // ---------- menu navigation (keyboard / gamepad) ----------

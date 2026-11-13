@@ -3,10 +3,10 @@ import * as THREE from 'three';
 import { Animal, type HitInfo } from './animals';
 import { audio, type Mood } from './audio';
 import { G } from './ctx';
-import { FISH, GEAR, GOODS_QUALITY, ITEMS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
+import { ESSENCES, FISH, GEAR, GOODS_QUALITY, HERBS, ITEMS, type Essence, QUALITY_NAMES, RECIPES, SPECIES, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
 import { input, rumble } from './input';
 import type { Shot } from './projectiles';
-import { S, addItem, addXp, ammoCap, buyPrice, capacity, count, countItem, invKey, maxHp, perk, removeAny, removeItem, sellValue, settings, skinBonus, splitKey, totalWeight, writeSave, zoneIndex, type Contract } from './state';
+import { S, buff, hotbar, maxStamina, addItem, addXp, ammoCap, buyPrice, capacity, count, countItem, invKey, maxHp, perk, removeAny, removeItem, sellValue, settings, skinBonus, splitKey, totalWeight, writeSave, zoneIndex, type Contract } from './state';
 import { WATER_Y } from './terrain';
 import { pick } from './util';
 import { Zone, type Station } from './world';
@@ -45,6 +45,7 @@ export class Game {
     G.player.teleport(t.town.x + 1.5, t.town.z + 24, Math.PI);
     G.player.cine = null;
     G.player.refreshBack();
+    G.zone.refreshHerbs(S.picked?.[id]?.day === S.day ? S.picked[id].idx : []);
     G.animals.populate(G.zone);
     this.legend = null;
     G.ui.boss(null);
@@ -101,7 +102,7 @@ export class Game {
     const a = info.animal, w = s.weapon;
     const unaware = a.unaware;
     let dmg = w.damage * s.power;
-    const dead = perk('deadeye') * 0.2;
+    const dead = perk('deadeye') * 0.2 + (buff('keen') ? 0.25 : 0);
     if (info.part === 'head') dmg *= 2.2 + dead;
     else if (info.part === 'vital') dmg *= 1.5 + dead;
     if (unaware) dmg *= w.kind === 'thrown' ? 3 : 1.5;
@@ -124,6 +125,7 @@ export class Game {
     S.flags.kill = true;
     const clean = a.hits === 1;
     this.gainXp(d.xp * (clean ? 1.25 : 1));
+    G.player.stamina = Math.min(maxStamina(), G.player.stamina + 30); // adrenaline
     G.ui.toast(`${d.name} down${clean ? ' — clean kill' : ''}${dist > 45 ? ` (${Math.round(dist)} m)` : ''}`, 'good', 'target');
     for (const c of S.contracts) {
       if (c.kind === 'hunt' && c.item === d.id && c.have < c.qty) {
@@ -196,6 +198,75 @@ export class Game {
     });
   }
 
+  /** Hotbar key pressed: draw that weapon, or use that consumable. */
+  useHotbar(i: number) {
+    const e = hotbar()[i];
+    if (!e) return;
+    if (e[0] === 'w' && e.length === 2) {
+      const sl = +e[1], p = G.player;
+      if (S.slots[sl] && sl !== S.active && !p.drawing && p.throwT < 0) { S.active = sl; audio.play('equip'); p.reload = 0; }
+    } else this.useItem(e);
+  }
+  useItem(key: string) {
+    if (key === 'tonic') return this.useTonic();
+    if (count(key) <= 0) { G.ui.toast(`No ${ITEMS[key]?.name ?? 'item'} left`, 'warn'); audio.play('error'); return; }
+    if (key === 'jerky') {
+      if (G.player.stamina >= maxStamina() - 1) return;
+      addItem(key, -1);
+      G.player.stamina = Math.min(maxStamina(), G.player.stamina + 60);
+      audio.play('pickup');
+      G.ui.toast('Chewed jerky (+60 stamina)', 'good', 'jerky');
+      return;
+    }
+    const ess = (Object.keys(ESSENCES) as Essence[]).find((e) => ESSENCES[e].potion === key);
+    if (!ess) return;
+    addItem(key, -1);
+    S.buffs = S.buffs ?? {};
+    S.buffs[ess] = ESSENCES[ess].dur;
+    if (ess === 'vigor') G.player.stamina = Math.min(maxStamina(), G.player.stamina + 70);
+    audio.play('quest');
+    G.ui.toast(`Drank ${ITEMS[key].name}`, 'good', key);
+  }
+  /** What a mix would make, judged only from essences the player has already discovered. */
+  brewPreview(herbs: string[]): Essence[] {
+    const cnt: Record<string, number> = {};
+    for (const h of herbs) for (const e of S.lore?.[h] ?? []) cnt[e] = (cnt[e] ?? 0) + 1;
+    return (Object.keys(cnt) as Essence[]).filter((e) => cnt[e] >= 2);
+  }
+  /** Brew 2-3 herbs: any essence shared by two or more becomes a potion, and is revealed on those herbs. */
+  brew(herbs: string[]): { made: [string, number][]; learned: [string, Essence][]; firsts: string[] } {
+    const res = { made: [] as [string, number][], learned: [] as [string, Essence][], firsts: [] as string[] };
+    if (herbs.length < 2 || herbs.some((h) => count(h) < herbs.filter((x) => x === h).length)) return res;
+    for (const h of herbs) addItem(h, -1);
+    const cnt: Record<string, number> = {};
+    for (const h of herbs) for (const e of HERBS[h].ess) cnt[e] = (cnt[e] ?? 0) + 1;
+    S.lore = S.lore ?? {}; S.brewed = S.brewed ?? {};
+    for (const e of Object.keys(cnt) as Essence[]) {
+      if (cnt[e] < 2) continue;
+      const pot = ESSENCES[e].potion, n = cnt[e] >= 3 ? 2 : 1;
+      addItem(pot, n);
+      res.made.push([pot, n]);
+      if (!S.brewed[pot]) res.firsts.push(pot);
+      S.brewed[pot] = (S.brewed[pot] ?? 0) + n;
+      for (const h of new Set(herbs)) if (HERBS[h].ess.includes(e) && !(S.lore[h] ??= []).includes(e)) { S.lore[h].push(e); res.learned.push([h, e]); }
+    }
+    if (res.made.length) { audio.play(res.firsts.length ? 'levelup' : 'quest'); this.gainXp(10 * res.made.length + 30 * res.firsts.length + 6 * res.learned.length); }
+    else audio.play('error');
+    return res;
+  }
+  gather(i: number) {
+    const h = G.zone.herbs[i];
+    if (!h || h.taken) return;
+    h.taken = true; h.obj.visible = false;
+    addItem(h.id, 1);
+    S.picked = S.picked ?? {};
+    const rec = S.picked[S.zone]?.day === S.day ? S.picked[S.zone] : (S.picked[S.zone] = { day: S.day, idx: [] });
+    rec.idx.push(i);
+    audio.play('pickup', { volume: 0.7 });
+    G.ui.toast(`+1 ${ITEMS[h.id].name}`, 'item', h.id);
+    this.gainXp(2);
+    if (!S.flags.hint_herb) { S.flags.hint_herb = true; G.ui.hint('Herbs hide <b>essences</b>. Mix two or three at a town <b>cauldron</b> to find out what they make.', 10); }
+  }
   useTonic() {
     if (S.hp >= maxHp()) return;
     if (!removeItem('tonic', 1)) { G.ui.toast('No tonics', 'warn'); return; }
@@ -208,7 +279,7 @@ export class Game {
   shopStock(kind: 'merchant' | 'fletcher' | 'fishmonger'): string[] {
     if (kind === 'fishmonger') return ['rod', 'bait'];
     const zi = zoneIndex(S.zone);
-    const ids = kind === 'merchant' ? ['salt', 'bark', 'thread', 'rivets', 'tonic', 'rod', 'bait'] : ['arrow', 'bolt', 'knife', 'tomahawk', 'javelin'];
+    const ids = kind === 'merchant' ? ['salt', 'bark', 'thread', 'rivets', 'tonic', 'jerky', 'rod', 'bait'] : ['arrow', 'bolt', 'knife', 'tomahawk', 'javelin'];
     return ids.filter((id) => (ITEMS[id].minZone ?? 0) <= zi);
   }
   weaponStock(): string[] {
@@ -403,7 +474,7 @@ export class Game {
     p.crouching = false;
     p.cine = { angle: p.yaw + 2.5, anim: 'Fishing_Cast', dist: 4.6, bobber: at };
     G.ui.startFishing({
-      fish: FISH[S.zone], luck: Math.min(1, S.level / 14),
+      fish: FISH[S.zone], luck: Math.min(1, S.level / 14) + (buff('angler') ? 1.5 : 0), quick: buff('angler'),
       onPhase: (anim) => { if (p.cine) p.cine.anim = anim; },
       onDone: (r) => {
         p.cine = null;
@@ -428,6 +499,7 @@ export class Game {
     audio.play('sleep');
     await G.ui.fade(true, 1.2, 'Resting…', pick(TIPS));
     if (S.time > 6.5) S.day++;
+    G.zone.refreshHerbs(S.picked?.[S.zone]?.day === S.day ? S.picked[S.zone].idx : []);
     S.time = 6.6;
     S.hp = maxHp();
     G.player.stamina = 999;
@@ -493,10 +565,23 @@ export class Game {
   }
   abandonContract(c: Contract) { S.contracts = S.contracts.filter((o) => o !== c); }
 
+  private nearHerb(): number {
+    const p = G.player.pos, hs = G.zone.herbs;
+    for (let i = 0; i < hs.length; i++) if (!hs[i].taken && Math.hypot(hs[i].pos.x - p.x, hs[i].pos.z - p.z) < 1.7) return i;
+    return -1;
+  }
+
   // ---------- per-frame ----------
   update(dt: number) {
     const p = G.player, z = G.zone;
     S.stats.playtime += dt;
+    // potion effects wear off
+    if (S.buffs) for (const k in S.buffs) {
+      if (S.buffs[k] <= 0) continue;
+      S.buffs[k] -= dt;
+      if (k === 'mending') S.hp = Math.min(maxHp(), S.hp + 3.5 * dt);
+      if (S.buffs[k] <= 0) { delete S.buffs[k]; G.ui.toast(`${ESSENCES[k as Essence].name} wore off`, 'item'); }
+    }
     if (!G.ui.isOpen) S.time = (S.time + dt / 55) % 24;
 
     // interaction focus
@@ -524,6 +609,10 @@ export class Game {
           if (st.kind === 'talk') G.ui.hint(`<b>${st.name}:</b> ${st.line ?? '…'}`, 8);
           else G.ui.open(st.kind);
         }
+      } else if (this.nearHerb() >= 0) {
+        const hi = this.nearHerb();
+        G.ui.setPrompt(`Gather ${ITEMS[z.herbs[hi].id].name}`, -1, 'E');
+        if (input.interactHit()) this.gather(hi);
       } else {
         const cast = count('rod') > 0 || !S.flags.hint_rod ? this.castPoint() : null;
         if (cast && count('rod') > 0) {
@@ -540,6 +629,8 @@ export class Game {
       }
     } else G.ui.setPrompt(null);
 
+    // herbs glint so they can be spotted in the grass
+    for (const h of z.herbs) if (!h.taken && Math.random() < dt * 1.6 && h.pos.distanceTo(p.pos) < 38) G.fx.emit(h.pos.x + (Math.random() - 0.5) * 0.4, h.pos.y + 0.5, h.pos.z + (Math.random() - 0.5) * 0.4, 0, 0.5, 0, 1, 0.12, 0xfff8c0, 0.9, 0);
     // contextual hints
     this.hintT -= dt;
     if (this.hintT <= 0) {

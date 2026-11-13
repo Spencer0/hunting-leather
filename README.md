@@ -14,7 +14,7 @@ day/night, generative music, save slots and gamepad support.
 | ![Sunscar Steppe](docs/sunscar.jpg) | ![Frostfang Peaks](docs/frostfang.jpg) |
 | ![A wilderness camp at dusk](docs/camp.jpg) | ![Scraping a hide](docs/tanning.jpg) |
 | ![The crafting bench](docs/crafting.jpg) | ![Fishing](docs/fishing.jpg) |
-| ![Rusthaven, the palisaded logging town](docs/rusthaven.jpg) | |
+| ![Rusthaven, the palisaded logging town](docs/rusthaven.jpg) | ![The cauldron](docs/cauldron.jpg) |
 
 ## The loop
 
@@ -27,8 +27,10 @@ day/night, generative music, save slots and gamepad support.
 4. **Sell** — every town values things differently. Furs are worth a fortune on the steppe.
 5. **Fish** — buy a pole and bait and cast from any lake shore: wait for the bite, track the fish with the
    mouse, then land it with a quick key sequence. Twelve fish, three per region, the rare ones fight harder.
-6. **Rank up** — earn Hunter Rank, spend skill points on nine perks, and unlock the wagon road to the next region.
-7. **End the legends** — each region hides a legendary beast. The last one has never been taken.
+6. **Brew** — gather glinting herbs in the wild and stir two or three together at a town cauldron. Each herb hides
+   two essences; herbs that share one make a potion, and you learn the essence. Seven potions to discover.
+7. **Rank up** — earn Hunter Rank, spend skill points on nine perks, and unlock the wagon road to the next region.
+8. **End the legends** — each region hides a legendary beast. The last one has never been taken.
 
 | Region | Town | Rank | Game |
 | --- | --- | --- | --- |
@@ -45,12 +47,12 @@ day/night, generative music, save slots and gamepad support.
 | Sprint · crouch · jump | Shift · C · Space | L3 or B · R3 · A |
 | Aim | Right mouse | LT |
 | Draw & loose / fire / throw | Left mouse (hold to draw a bow) | RT |
-| Bow · crossbow · thrown | 1 · 2 · 3 or wheel | LB / RB |
+| Hotbar (weapons, potions, food — rebindable) | 1–5; wheel/Q cycles weapons | LB / RB |
 | Span crossbow | R | — |
 | Knife slash (staggers) | F or middle mouse | Y |
 | Interact / skin | E | X |
 | Drink tonic | H | D-pad up |
-| Journal (pack, skills, map) | Tab | Back |
+| Journal (pack, skills, map, codex) | Tab | Back |
 | Pause | Esc | Start |
 
 ## Tech

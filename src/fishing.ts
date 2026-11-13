@@ -7,6 +7,7 @@ export interface FishResult { fish: string | null; weight: number; perfect: bool
 export interface FishOpts {
   fish: [string, string, string]; // common, uncommon, rare
   luck: number; // 0..1 shifts the odds toward rarer fish
+  quick?: boolean; // bites come sooner
   onPhase: (anim: string) => void;
   onDone: (r: FishResult) => void;
 }
@@ -48,6 +49,7 @@ export class Fishing {
     this.g.scale(2, 2);
     setTimeout(() => window.addEventListener('mousedown', this.onDown), 300);
     window.addEventListener('mousemove', this.onMove);
+    if (o.quick) this.waitFor *= 0.5;
     o.onPhase('Fishing_Cast');
     audio.play('throw', { volume: 0.5 });
     setTimeout(() => { if (this.phase === 'wait') { o.onPhase('Fishing_Idle'); audio.play('splash', { volume: 0.4 }); } }, 900);
