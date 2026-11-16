@@ -15,8 +15,14 @@ day/night, generative music, save slots and gamepad support.
 | ![A wilderness camp at dusk](docs/camp.jpg) | ![Scraping a hide](docs/tanning.jpg) |
 | ![The crafting bench](docs/crafting.jpg) | ![Fishing](docs/fishing.jpg) |
 | ![Rusthaven, the palisaded logging town](docs/rusthaven.jpg) | ![The cauldron](docs/cauldron.jpg) |
+| ![The cabin where you start](docs/cabin.jpg) | |
 
 ## The loop
+
+You begin at a cabin outside Fernwick with a handful of throwing spears and a crooked fishing rod. Rabbits and
+squirrels feed in the grass around it; Old Marn, the trapper camped next door, buys their pelts and sells bait;
+the pond behind his tent has fish; and the road leads to town, where fish become coin and coin becomes a bow.
+Spears only really hurt small game — deer need that bow.
 
 1. **Hunt** — stalk game with bows, crossbows and thrown weapons. Crouch to stay unseen; an unaware animal
    takes far more damage. Head and heart shots count.
@@ -25,16 +31,18 @@ day/night, generative music, save slots and gamepad support.
    then lay materials out on a 3×3 pattern grid and stitch them into trade goods or gear. Clean stitching makes
    *Fine* goods that sell for more.
 4. **Sell** — every town values things differently. Furs are worth a fortune on the steppe.
-5. **Fish** — buy a pole and bait and cast from any lake shore: wait for the bite, track the fish with the
-   mouse, then land it with a quick key sequence. Twelve fish, three per region, the rare ones fight harder.
-6. **Brew** — gather glinting herbs in the wild and stir two or three together at a town cauldron. Each herb hides
+5. **Fish** — with any rod and some bait, cast from any lake shore: wait for the bite, track the fish with the
+   mouse, then land it with a quick key sequence. Twelve fish, three per region, the rare ones fight harder
+   (and only a proper pole from a merchant can land them).
+6. **Brew** — gather herbs (look for the butterflies) in the wild and stir two or three together at a town cauldron. Each herb hides
    two essences; herbs that share one make a potion, and you learn the essence. Seven potions to discover.
-7. **Rank up** — earn Hunter Rank, spend skill points on nine perks, and unlock the wagon road to the next region.
+7. **Level up** — Hunting, Fishing and Crafting are separate skills, each with its own levels and its own perks.
+   Hunting opens the wagon road to the next region; Crafting unlocks bench patterns; Fishing brings rarer fish.
 8. **End the legends** — each region hides a legendary beast. The last one has never been taken.
 
-| Region | Town | Rank | Game |
+| Region | Town | Hunting | Game |
 | --- | --- | --- | --- |
-| Greenhollow Vale | Fernwick | 1 | Doe, Red Fox, Amber Stag · *Emberclaw* |
+| Greenhollow Vale | Fernwick | 1 | Rabbit, Squirrel, Doe, Red Fox, Amber Stag · *Emberclaw* |
 | Amberwood | Rusthaven | 4 | Stag, Grey Wolf, Wood Aurochs · *The Amber Monarch* |
 | Sunscar Steppe | Dunmarch | 8 | Bison, Vicuña, Dust Jackal · *Ironhorn* |
 | Frostfang Peaks | Hollowfrost | 12 | Frostfang Wolf, Rime Elk, Tundra Ox · *Old Rime* |
@@ -65,7 +73,8 @@ day/night, generative music, save slots and gamepad support.
   stars and clouds; full day/night lighting; soft shadow maps.
 - Skinned CC0 models with layered upper/lower-body animation for the hunter, bone-driven hit zones on animals.
 - Fully procedural audio score and ambience (WebAudio), plus CC0 sampled effects.
-- Saves to `localStorage` (three slots, autosave, sleep-to-save).
+- Saves to `localStorage` (three slots, autosave, sleep-to-save). Saves carry a version; a save from an older
+  version is discarded rather than migrated (bump `SAVE_VERSION` in `src/state.ts` when the format changes).
 
 ```bash
 npm install

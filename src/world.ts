@@ -2,12 +2,13 @@
 import * as THREE from 'three';
 import { clips, model, rawModel, uniqueMaterials } from './assets';
 import { icon } from './icons';
+import { Lure } from './lure';
 import { HERBS, ITEMS, type ZoneDef } from './data';
 import { CELL, PLAY, TOWN_R, WATER_Y, WORLD, buildTerrain, edgeDist, type Terrain } from './terrain';
 import { Noise, clamp, rng, smooth, weighted } from './util';
 
 export interface Collider { x: number; z: number; r: number; h: number; kind: 'tree' | 'rock' | 'building' | 'prop' }
-export type StationKind = 'merchant' | 'fletcher' | 'tanner' | 'inn' | 'wagon' | 'board' | 'campfire' | 'bedroll' | 'fishmonger' | 'lodge' | 'talk' | 'cauldron';
+export type StationKind = 'merchant' | 'fletcher' | 'tanner' | 'inn' | 'wagon' | 'board' | 'campfire' | 'bedroll' | 'fishmonger' | 'lodge' | 'talk' | 'cauldron' | 'trapper';
 export interface Station { kind: StationKind; pos: THREE.Vector3; radius: number; prompt: string; name: string; npc?: Npc; line?: string }
 
 const uTime = { value: 0 };
@@ -134,7 +135,7 @@ export class Zone {
   stations: Station[] = [];
   npcs: Npc[] = [];
   walkers: Walker[] = [];
-  herbs: { id: string; pos: THREE.Vector3; obj: THREE.Object3D; taken: boolean }[] = [];
+  herbs: { id: string; pos: THREE.Vector3; obj: THREE.Object3D; taken: boolean; lure: Lure; seed: number }[] = [];
   fires: { pos: THREE.Vector3; sprites: THREE.Sprite[]; light: THREE.PointLight }[] = [];
   private grid = new Map<number, Collider[]>();
   private grassChunks: THREE.InstancedMesh[] = [];
@@ -151,6 +152,7 @@ export class Zone {
     this.disposables.push(this.terrain.mesh.geometry, this.terrain.mesh.material as THREE.Material);
     this.water = this.buildWater();
     this.buildTown();
+    if (this.terrain.home) this.buildHomestead(this.terrain.home);
     this.buildCamps();
     this.buildHerbs();
     this.buildVegetation(quality);
@@ -496,7 +498,7 @@ export class Zone {
   }
   private marker(kind: StationKind, pos: THREE.Vector3, h: number) {
     const ic: Record<string, [string, string]> = { merchant: ['coin', '#e0b040'], fletcher: ['bow', '#c8a070'], tanner: ['hide', '#b98a58'], inn: ['bed', '#c86a5a'], wagon: ['wagon', '#99643a'], board: ['scroll', '#e8dcc0'] };
-    ic.cauldron = ['tonic', '#6ac86a']; ic.fishmonger = ['fish', '#6aa8c8']; ic.lodge = ['skull', '#c8483a'];
+    ic.cauldron = ['tonic', '#6ac86a']; ic.trapper = ['paw', '#b98a58']; ic.bedroll = ['bed', '#c86a5a']; ic.fishmonger = ['fish', '#6aa8c8']; ic.lodge = ['skull', '#c8483a'];
     const def = ic[kind];
     if (!def) return;
     const c = document.createElement('canvas');
@@ -710,13 +712,21 @@ export class Zone {
         g.scale.setScalar(2.1);
         g.position.set(x, y - 0.02, z);
         this.group.add(g);
-        this.herbs.push({ id, pos: new THREE.Vector3(x, y, z), obj: g, taken: false });
+        const lure = new Lure(col.getHex(), 'herb');
+        lure.group.position.set(x, y, z);
+        this.group.add(lure.group);
+        this.disposables.push(lure);
+        this.herbs.push({ id, pos: new THREE.Vector3(x, y, z), obj: g, taken: false, lure, seed: r() * 10 });
         placed++;
       }
     }
   }
   refreshHerbs(taken: number[]) {
-    this.herbs.forEach((h, i) => { h.taken = taken.includes(i); h.obj.visible = !h.taken; });
+    this.herbs.forEach((h, i) => {
+      h.taken = taken.includes(i); h.obj.visible = !h.taken;
+      if (!h.taken && h.lure.gone) { h.lure.dispose(); h.lure = new Lure(new THREE.Color(ITEMS[h.id].color).getHex(), 'herb'); h.lure.group.position.copy(h.pos); this.group.add(h.lure.group); this.disposables.push(h.lure); }
+      if (h.taken) h.lure.gone = true;
+    });
   }
   /** An iron cauldron on a tripod over embers, for brewing. */
   private cauldron(x: number, z: number) {
@@ -737,6 +747,50 @@ export class Zone {
     this.fire(new THREE.Vector3(x, y - 0.25, z));
     this.stations.push({ kind: 'cauldron', pos, radius: 2.6, prompt: 'Brew at the cauldron', name: 'Cauldron' });
     this.marker('cauldron', pos, 3.0);
+  }
+
+  /** The hunter's cabin outside Fernwick: a bed, a fire, a trapper camped by the path and a pond over the rise. */
+  private buildHomestead(h: THREE.Vector3) {
+    const t = this.terrain, pond = t.lakes[0];
+    const toTown = Math.atan2(t.town.x - h.x, t.town.z - h.z), toPond = Math.atan2(pond.x - h.x, pond.z - h.z);
+    const at = (ang: number, rad: number): [number, number] => [h.x + Math.sin(ang) * rad, h.z + Math.cos(ang) * rad];
+    // the cabin stands with its back to the woods and its door to the fire, the trapper and the pond beyond
+    const back = toPond + Math.PI;
+    const [cx, cz] = at(back, 11.5);
+    this.prop('town/building_home_A_blue', cx, cz, toPond, 7.6, 3.4, -0.05);
+    const [dx, dz] = at(back, 7.1);
+    const door = new THREE.Vector3(dx, t.height(dx, dz), dz);
+    this.stations.push({ kind: 'bedroll', pos: door, radius: 2.0, prompt: 'Sleep until morning', name: 'Your cabin' });
+    this.marker('bedroll', door, 3.4);
+    // yard: fire, log seat, woodpile, practice target
+    const [fx, fz] = at(toPond + 1.0, 4.6);
+    this.prop('props/k_campfire-pit', fx, fz, 0, 5.5, 0.7, 0, 0x9a8a80);
+    const fpos = new THREE.Vector3(fx, t.height(fx, fz), fz);
+    this.fire(fpos);
+    this.stations.push({ kind: 'campfire', pos: fpos, radius: 2.2, prompt: 'Cook at the fire', name: 'Campfire' });
+    { const [x, z] = at(toPond + 1.25, 7.2); this.prop('props/k_tree-log', x, z, toPond - 0.3, 3.6, 0.6, 0, 0x8a6a50); }
+    { const [x, z] = at(back + 0.62, 13.5); this.prop('town/resource_lumber', x, z, toPond + 0.4, 6, 1); }
+    { const [x, z] = at(back - 0.5, 12.2); this.prop('town/barrel', x, z, 0, 6.5, 0.6); }
+    { const [x, z] = at(back - 0.6, 13.2); this.prop('town/crate_B_small', x, z, 0.5, 6.5, 0.5); }
+    { const [x, z] = at(toPond + 1.9, 13); this.prop('town/target', x, z, toPond - 1.4, 6.5, 0.7); }
+    // signpost where the road leaves for town
+    { const [x, z] = at(toTown + 0.22, 12.5); this.prop('props/k_signpost', x, z, toTown, 4.2, 0.3, 0, 0x9a8468); }
+    // the trapper's camp, on the pond side of the yard
+    const [tx, tz] = at(toPond - 0.5, 15);
+    this.tent(tx, tz, toPond + 1.2);
+    const [nx, nz] = at(toPond - 0.32, 12.2);
+    const face = Math.atan2(h.x - nx, h.z - nz);
+    const npc = new Npc('Engineer', new THREE.Vector3(nx, t.height(nx, nz), nz), face, 'Old Marn the Trapper');
+    this.npcs.push(npc);
+    this.group.add(npc.obj);
+    this.addCollider({ x: nx, z: nz, r: 0.45, h: 2, kind: 'prop' });
+    { const [x, z] = at(toPond - 0.18, 13.6); this.prop('props/Peg_Rack', x, z, face, 1.2, 0.5, 0); }
+    { const [x, z] = at(toPond - 0.46, 12.6); this.prop('props/Crate_Wooden', x, z, 0.3, 0.9, 0.55); }
+    { const [x, z] = at(toPond - 0.6, 12.2); this.prop('props/Bag', x, z, 1, 1.1, 0); }
+    this.stations.push({ kind: 'trapper', pos: npc.pos.clone(), radius: 3, prompt: 'Trade pelts and bait', name: 'Old Marn the Trapper', npc });
+    this.marker('trapper', npc.pos, 2.5);
+    // a log to sit on at the pond's edge
+    { const d = Math.hypot(pond.x - h.x, pond.z - h.z) - pond.r - 3.5; const [x, z] = at(toPond + 0.12, d); this.prop('props/k_tree-log', x, z, toPond + 1.4, 3.6, 0.6, 0, 0x8a6a50); }
   }
 
   private noticeBoard(x: number, z: number, ry: number) {
@@ -966,6 +1020,16 @@ export class Zone {
       f.light.intensity = d < 70 ? (14 + Math.sin(time * 11 + f.pos.z) * 3 + Math.sin(time * 27) * 1.5) * (0.35 + night * 0.65) : 0;
     }
     for (const l of this.lamps) l.intensity = night * 26;
+    for (const h of this.herbs) {
+      const d = Math.hypot(h.pos.x - player.x, h.pos.z - player.z);
+      h.lure.update(time, d, dt);
+      if (!h.taken && d < 30) {
+        // plants sway, and give a little wiggle when you come close
+        const near = Math.max(0, 1 - d / 4.5);
+        h.obj.rotation.z = Math.sin(time * 1.7 + h.seed) * 0.06 + Math.sin(time * 9 + h.seed) * 0.07 * near;
+        h.obj.scale.set(2.1, 2.1 * (1 + Math.sin(time * 6 + h.seed) * 0.07 * near), 2.1);
+      }
+    }
     for (let i = 0; i < this.markers.length; i++) {
       const m = this.markers[i], d = Math.hypot(m.position.x - player.x, m.position.z - player.z);
       m.visible = d < 46 && d > 3.4;

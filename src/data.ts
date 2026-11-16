@@ -29,9 +29,19 @@ export interface SpeciesDef {
   legendary?: boolean;
   blurb: string;
   anim: 'quad' | 'biped';
+  proc?: 'rabbit' | 'squirrel'; // built in code rather than loaded (small game)
+  small?: boolean; // small game: generous hit zones, short flight, the only thing a crude spear can kill
 }
 
 export const SPECIES: Record<string, SpeciesDef> = {
+  rabbit: {
+    id: 'rabbit', name: 'Meadow Rabbit', model: 'proc', proc: 'rabbit', small: true, length: 0.52, hp: 8, speed: 7.0, walk: 1.3, behaviour: 'skittish', damage: 0,
+    senses: 0.55, xp: 7, hide: 'hide_rabbit', meat: 1, blurb: 'Nibbles the clover around every cabin in the vale. Easy to creep up on, quick once it bolts.', anim: 'quad', pack: [1, 3],
+  },
+  squirrel: {
+    id: 'squirrel', name: 'Red Squirrel', model: 'proc', proc: 'squirrel', small: true, length: 0.4, hp: 5, speed: 6.2, walk: 1.1, behaviour: 'skittish', damage: 0,
+    senses: 0.5, xp: 6, hide: 'hide_squirrel', meat: 0, blurb: 'Busy, bold and forever burying things. A fine first target for a thrown spear.', anim: 'quad', pack: [1, 2],
+  },
   fox: {
     id: 'fox', name: 'Red Fox', model: 'Fox', length: 1.05, hp: 20, speed: 9.5, walk: 1.6, behaviour: 'skittish', damage: 0,
     senses: 1.15, xp: 14, hide: 'hide_fox', meat: 1, blurb: 'Quick and wary. A small target, but its pelt is prized for trim and hats.', anim: 'quad',
@@ -138,7 +148,7 @@ export interface ZoneDef {
 export const ZONES: Record<string, ZoneDef> = {
   greenhollow: {
     id: 'greenhollow', name: 'Greenhollow Vale', town: 'Fernwick', rank: 1, fare: 0, subtitle: 'Soft meadows and birch-lined streams', seed: 11,
-    spawns: [['doe', 5], ['fox', 5], ['stag', 1]], legendary: 'emberclaw',
+    spawns: [['rabbit', 6], ['squirrel', 5], ['doe', 5], ['fox', 5], ['stag', 1]], legendary: 'emberclaw',
     trees: [['CommonTree_1', 3], ['CommonTree_2', 3], ['CommonTree_3', 2], ['CommonTree_5', 2], ['Pine_1', 1]], treeDensity: 1, leafTint: 0xffffff, barkTint: 0xffffff,
     grassColor: 0x4f8f2f, grassTip: 0xb7d94c, ground: ['grass', 'dirt', 'rock'], groundTint: 0xffffff,
     bushes: [['Bush_Common_Flowers', 1], ['Bush_Common', 4], ['Fern_1', 3], ['Flower_3_Group', 3], ['Flower_4_Group', 3], ['Plant_1_Big', 2], ['Mushroom_Common', 1]], bushTint: 0xffffff, rocks: 50,
@@ -194,6 +204,8 @@ function item(id: string, name: string, cat: ItemCat, value: number, weight: num
   I[id] = { id, name, cat, value, weight, icon, color, desc, buy, minZone };
 }
 // Hides
+item('hide_rabbit', 'Rabbit Pelt', 'hide', 7, 0.3, 'pelt', '#b8a488', 'Small and soft. Trappers buy them by the bundle.');
+item('hide_squirrel', 'Squirrel Pelt', 'hide', 5, 0.2, 'pelt', '#c0683a', 'A scrap of russet fur with a fine tail.');
 item('hide_fox', 'Fox Pelt', 'hide', 16, 1, 'pelt', '#d9773a', 'A soft russet pelt. Tans into soft fur.');
 item('hide_deer', 'Deer Hide', 'hide', 20, 2, 'hide', '#b98a58', 'Thin and supple. Tans into light leather.');
 item('hide_stag', 'Stag Hide', 'hide', 38, 3, 'hide', '#9a6a3c', 'Broad and even. Tans into sturdy leather.');
@@ -226,6 +238,7 @@ item('meat', 'Game Meat', 'meat', 7, 1, 'meat', '#c0504a', 'Fresh cuts. Sells an
 // Supplies
 item('arrow', 'Arrow', 'ammo', 1, 0.05, 'arrow', '#d8c8a0', 'A fletched hunting arrow.', 3);
 item('bolt', 'Bolt', 'ammo', 2, 0.08, 'bolt', '#b8b8c0', 'A short, heavy crossbow bolt.', 5);
+item('spear', 'Throwing Spear', 'ammo', 1, 0.3, 'spear', '#b89868', 'A fire-hardened stick. Good for rabbits, not much else.', 3);
 item('knife', 'Throwing Knife', 'ammo', 4, 0.2, 'knife', '#c8d0d8', 'Balanced for the throw. Quiet and quick.', 9);
 item('tomahawk', 'Tomahawk', 'ammo', 10, 0.6, 'axe', '#a8b0b8', 'A hatchet weighted to bite deep.', 24, 1);
 item('javelin', 'Javelin', 'ammo', 18, 1, 'spear', '#c8b088', 'A long throwing spear for big game.', 42, 2);
@@ -255,7 +268,8 @@ item('p_keen', 'Keen-eye Drops', 'potion', 55, 0.2, 'tonic', '#f0c030', 'Rock-st
 item('p_swift', 'Swiftfoot Tonic', 'potion', 50, 0.2, 'tonic', '#e0902a', 'Move 20% faster for 90s.');
 item('p_ironhide', 'Ironhide Brew', 'potion', 60, 0.2, 'tonic', '#8a94a0', 'Take 25% less damage for 120s.');
 item('p_angler', "Angler's Luck", 'potion', 50, 0.2, 'tonic', '#4aa8d8', 'Fish bite sooner and rare fish are likelier for 5 minutes.');
-item('rod', 'Fishing Pole', 'supply', 20, 1, 'rod', '#a8743c', 'Cast it from any lake shore.', 60);
+item('rod0', 'Crooked Rod', 'supply', 1, 1, 'rod', '#8a7a5a', 'A bent hazel switch and some twine. Fish bite slowly and big ones snap it.', 5);
+item('rod', 'Fishing Pole', 'supply', 20, 1, 'rod', '#a8743c', 'A proper pole: quicker bites, a steadier line, and a chance at rare fish.', 60);
 item('bait', 'Bait', 'supply', 1, 0.05, 'bait', '#d87a8a', 'One wriggling worm per cast.', 3);
 // Fish: [common, uncommon, rare] per region
 item('f_trout', 'Brook Trout', 'fish', 16, 0.6, 'fish', '#9ab86a', 'Speckled and quick. Good eating.');
@@ -344,9 +358,10 @@ export interface WeaponDef {
   time: number; // draw / reload / wind-up seconds
   ammo: string; model: string; price: number; zone: number; // sold from zone index
   desc: string; color: string; modelScale?: number;
+  weak?: boolean; // only really hurts small game
 }
 export const WEAPONS: Record<string, WeaponDef> = {
-  bow1: { id: 'bow1', name: 'Ash Shortbow', kind: 'bow', tier: 1, damage: 24, speed: 52, time: 0.8, ammo: 'arrow', model: 'bow_withString', price: 0, zone: 0, desc: 'Your father’s bow. Light draw, short reach.', color: '#c8a070' },
+  bow1: { id: 'bow1', name: 'Ash Shortbow', kind: 'bow', tier: 1, damage: 24, speed: 52, time: 0.8, ammo: 'arrow', model: 'bow_withString', price: 60, zone: 0, desc: 'A plain ash bow. Light draw, short reach — but it will drop a deer.', color: '#c8a070' },
   bow2: { id: 'bow2', name: "Hunter's Recurve", kind: 'bow', tier: 2, damage: 38, speed: 62, time: 0.85, ammo: 'arrow', model: 'bow_A_withString', price: 160, zone: 0, desc: 'A proper working bow.', color: '#b08050' },
   bow3: { id: 'bow3', name: 'Yew Longbow', kind: 'bow', tier: 3, damage: 58, speed: 74, time: 1.0, ammo: 'arrow', model: 'bow_B_withString', price: 620, zone: 1, desc: 'Long reach and a heavy hit.', color: '#8a6038' },
   bow4: { id: 'bow4', name: 'Horn Composite Bow', kind: 'bow', tier: 4, damage: 84, speed: 86, time: 1.0, ammo: 'arrow', model: 'bow_C_withString', price: 1900, zone: 2, desc: 'Steppe-made. Punches far above its size.', color: '#e0c890' },
@@ -355,12 +370,13 @@ export const WEAPONS: Record<string, WeaponDef> = {
   xbow2: { id: 'xbow2', name: 'Heavy Crossbow', kind: 'crossbow', tier: 2, damage: 96, speed: 95, time: 2.9, ammo: 'bolt', model: 'crossbow_2handed', price: 1100, zone: 1, desc: 'Drops a stag where it stands.', color: '#806040' },
   xbow3: { id: 'xbow3', name: 'Siege Arbalest', kind: 'crossbow', tier: 3, damage: 165, speed: 110, time: 3.5, ammo: 'bolt', model: 'crossbow_2handed', price: 3200, zone: 2, desc: 'Steel prod, windlass, and no mercy.', color: '#6a7078', modelScale: 1.2 },
   xbow4: { id: 'xbow4', name: 'Ironhorn Arbalest', kind: 'crossbow', tier: 4, damage: 240, speed: 120, time: 3.2, ammo: 'bolt', model: 'crossbow_2handed', price: 0, zone: 9, desc: 'The prod is a single grey horn. It hums when spanned.', color: '#b8bcc4', modelScale: 1.25 },
+  thr0: { id: 'thr0', name: 'Throwing Spears', kind: 'thrown', tier: 0, damage: 10, speed: 27, time: 0.42, ammo: 'spear', model: 'spear_A', price: 0, zone: 0, desc: 'Sharpened sticks. Fine for rabbits and squirrels; a deer barely feels them.', color: '#b89868', weak: true },
   thr1: { id: 'thr1', name: 'Throwing Knives', kind: 'thrown', tier: 1, damage: 18, speed: 30, time: 0.3, ammo: 'knife', model: 'dagger', price: 0, zone: 0, desc: 'Silent. Triple damage on unaware prey.', color: '#c8d0d8' },
   thr2: { id: 'thr2', name: 'Tomahawks', kind: 'thrown', tier: 2, damage: 46, speed: 28, time: 0.42, ammo: 'tomahawk', model: 'axe_1handed', price: 0, zone: 1, desc: 'Heavy, spinning, decisive.', color: '#a8b0b8' },
   thr3: { id: 'thr3', name: 'Javelins', kind: 'thrown', tier: 3, damage: 92, speed: 34, time: 0.55, ammo: 'javelin', model: 'spear_A', price: 0, zone: 2, desc: 'For game that does not notice knives.', color: '#c8b088' },
 };
 // thrown weapons are unlocked by owning their ammo
-export const THROWN_BY_AMMO: Record<string, string> = { knife: 'thr1', tomahawk: 'thr2', javelin: 'thr3' };
+export const THROWN_BY_AMMO: Record<string, string> = { spear: 'thr0', knife: 'thr1', tomahawk: 'thr2', javelin: 'thr3' };
 
 export interface RecipeDef {
   id: string; name: string; section: 'Trade Goods' | 'Gear' | 'Weapons';
@@ -391,7 +407,8 @@ function recipe(id: string, name: string, section: RecipeDef['section'], out: Re
   const cells = patternCells(pattern);
   const cnt: Record<string, number> = {};
   for (const c of cells) if (c) cnt[c] = (cnt[c] ?? 0) + 1;
-  return { id, name, section, out, pattern, rank, xp, needs: Object.entries(cnt), key: gridKey(cells) };
+  // ranks are crafting-skill levels
+  return { id, name, section, out, pattern, rank: Math.max(1, Math.round(rank * 0.75)), xp, needs: Object.entries(cnt), key: gridKey(cells) };
 }
 export const RECIPES: RecipeDef[] = [
   recipe('r_pouch', 'Coin Pouch', 'Trade Goods', { item: 'g_pouch' }, 1, 10, ['.t.', 'L.L', '.L.']),
@@ -422,30 +439,42 @@ export const RECIPES: RecipeDef[] = [
   recipe('r_xbow4', 'Ironhorn Arbalest', 'Weapons', { weapon: 'xbow4' }, 11, 400, ['rIr', '.H.', '.H.']),
 ];
 
-export interface PerkDef { id: string; name: string; max: number; desc: (n: number) => string; icon: string }
+export type Skill = 'hunting' | 'fishing' | 'crafting';
+export const SKILL_ORDER: Skill[] = ['hunting', 'fishing', 'crafting'];
+export const SKILLS: Record<Skill, { name: string; icon: string; color: string; blurb: string }> = {
+  hunting: { name: 'Hunting', icon: 'target', color: '#f0803c', blurb: 'Kills, skinning, bounties. Opens new regions; each level adds health and stamina.' },
+  fishing: { name: 'Fishing', icon: 'fish', color: '#4ab4e8', blurb: 'Every catch. Higher levels bring rarer fish to the hook.' },
+  crafting: { name: 'Crafting', icon: 'leather', color: '#e8b84a', blurb: 'Tanning, stitching, brewing and trade. Unlocks bench patterns.' },
+};
+export interface PerkDef { id: string; name: string; max: number; desc: (n: number) => string; icon: string; skill: Skill }
 export const PERKS: PerkDef[] = [
-  { id: 'steady', name: 'Steady Hands', max: 3, icon: 'bow', desc: (n) => `Aim sways ${n * 25}% less and holds ${n * 30}% longer.` },
-  { id: 'deadeye', name: 'Deadeye', max: 3, icon: 'target', desc: (n) => `Head and heart shots deal ${n * 20}% more damage.` },
-  { id: 'lightstep', name: 'Light Step', max: 3, icon: 'boot', desc: (n) => `Animals notice you ${n * 15}% more slowly.` },
-  { id: 'skinner', name: 'Clean Cuts', max: 3, icon: 'knife', desc: (n) => `Hide quality improves. Skinning is ${n * 20}% faster.` },
-  { id: 'tanner', name: 'Master Tanner', max: 3, icon: 'leather', desc: (n) => `${n * 15}% chance of a bonus leather when tanning.` },
-  { id: 'haggler', name: 'Silver Tongue', max: 3, icon: 'coin', desc: (n) => `Sell for ${n * 6}% more. Buy for ${n * 4}% less.` },
-  { id: 'mule', name: 'Pack Mule', max: 3, icon: 'bag', desc: (n) => `Carry ${n * 12} more weight.` },
-  { id: 'hardy', name: 'Hardy', max: 3, icon: 'heart', desc: (n) => `+${n * 20} maximum health, +${n * 12} stamina.` },
-  { id: 'fletcher', name: 'Scavenger', max: 3, icon: 'arrow', desc: (n) => `${n * 15}% more ammunition survives a shot.` },
+  { id: 'steady', name: 'Steady Hands', max: 3, skill: 'hunting', icon: 'bow', desc: (n) => `Aim sways ${n * 25}% less and holds ${n * 30}% longer.` },
+  { id: 'deadeye', name: 'Deadeye', max: 3, skill: 'hunting', icon: 'target', desc: (n) => `Head and heart shots deal ${n * 20}% more damage.` },
+  { id: 'lightstep', name: 'Light Step', max: 3, skill: 'hunting', icon: 'boot', desc: (n) => `Animals notice you ${n * 15}% more slowly.` },
+  { id: 'skinner', name: 'Clean Cuts', max: 3, skill: 'hunting', icon: 'knife', desc: (n) => `Hide quality improves. Skinning is ${n * 20}% faster.` },
+  { id: 'tanner', name: 'Master Tanner', max: 3, skill: 'crafting', icon: 'leather', desc: (n) => `${n * 15}% chance of a bonus leather when tanning.` },
+  { id: 'haggler', name: 'Silver Tongue', max: 3, skill: 'crafting', icon: 'coin', desc: (n) => `Sell for ${n * 6}% more. Buy for ${n * 4}% less.` },
+  { id: 'mule', name: 'Pack Mule', max: 3, skill: 'crafting', icon: 'bag', desc: (n) => `Carry ${n * 12} more weight.` },
+  { id: 'hardy', name: 'Hardy', max: 3, skill: 'hunting', icon: 'heart', desc: (n) => `+${n * 20} maximum health, +${n * 12} stamina.` },
+  { id: 'brewer', name: 'Deft Brewer', max: 3, skill: 'crafting', icon: 'tonic', desc: (n) => `${n * 15}% chance of an extra potion from every brew.` },
+  { id: 'patient', name: 'Patient Angler', max: 3, skill: 'fishing', icon: 'bait', desc: (n) => `Fish bite ${n * 20}% sooner.` },
+  { id: 'strongline', name: 'Strong Line', max: 3, skill: 'fishing', icon: 'rod', desc: (n) => `A slack line loses ground ${n * 18}% more slowly.` },
+  { id: 'lucky', name: 'Lucky Hook', max: 3, skill: 'fishing', icon: 'fish', desc: (n) => `Uncommon and rare fish are ${n * 30}% likelier.` },
+  { id: 'fletcher', name: 'Scavenger', max: 3, skill: 'hunting', icon: 'arrow', desc: (n) => `${n * 15}% more ammunition survives a shot.` },
 ];
 
 export const MAX_LEVEL = 20;
 export function xpForLevel(level: number): number {
   // xp needed to go from `level` to `level+1`
-  return Math.round(60 + 40 * (level - 1) + 9 * (level - 1) * (level - 1));
+  return Math.round(40 + 30 * (level - 1) + 6 * (level - 1) * (level - 1));
 }
 
 export const TIPS = [
   'Crouch to move quietly. An animal that has not noticed you takes far more damage.',
   'Aim for the head or just behind the shoulder. A clean kill means a better hide.',
   'Every extra arrow you put in an animal ruins a little more of its hide.',
-  'Throwing knives deal triple damage to unaware prey.',
+  'Thrown weapons deal triple damage to unaware prey. Spears are only good for small game.',
+  'Hunting, fishing and crafting each level up on their own, and each has its own skills to learn.',
   'Crossbows hit hard and fly flat, but take a long time to span.',
   'Raw hides sell poorly. Tan them, craft them, then sell where the price is best.',
   'Furs sell best where it is hot and nobody has any. Ask a steppe merchant.',
@@ -454,7 +483,7 @@ export const TIPS = [
   'Retrieve your arrows from the ground and from your kills.',
   'Legendary beasts leave signs. Check the notice board for rumours.',
   'Roast game meat at any campfire to restore health in the field.',
-  'Buy a fishing pole and bait, then cast from any lake shore. Rare fish fight harder.',
+  'With bait and any rod you can cast from a lake shore. A proper pole from a merchant lands rarer fish.',
   'Rusthaven’s fishmonger pays the best prices for fish; its huntmaster pays bounties on wolves.',
   'Gather herbs in the wild and stir two or three together at a town cauldron. Herbs that share a hidden essence make a potion.',
   'Out of breath? Stand still or crouch to recover stamina quickly, or chew some jerky.',

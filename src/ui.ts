@@ -3,13 +3,13 @@ import * as THREE from 'three';
 import type { Animal } from './animals';
 import { audio } from './audio';
 import { G } from './ctx';
-import { ESSENCES, FISH, GEAR, GOODS_QUALITY, HERBS, ITEMS, type Essence, MAX_LEVEL, PERKS, QUALITY_NAMES, RECIPES, SPECIES, TANNING, TIPS, WEAPONS, ZONES, ZONE_ORDER, gridKey, patternCells, xpForLevel, type GearSlot, type RecipeDef, type WeaponDef } from './data';
+import { ESSENCES, FISH, GEAR, GOODS_QUALITY, HERBS, ITEMS, type Essence, MAX_LEVEL, PERKS, QUALITY_NAMES, RECIPES, SKILLS, SKILL_ORDER, type Skill, SPECIES, TANNING, TIPS, WEAPONS, ZONES, ZONE_ORDER, gridKey, patternCells, xpForLevel, type GearSlot, type RecipeDef, type WeaponDef } from './data';
 import { CauldronView } from './alchemy';
 import { Fishing, type FishOpts } from './fishing';
 import { Minigame, type MiniOpts } from './minigame';
 import { icon } from './icons';
 import { input, lockPointer, locked, unlockPointer, usingPad } from './input';
-import { RANK_TITLES, S, hotbar, keyLabel, usable, activeWeapon, addItem, ammoCap, buyPrice, canBuyPerk, capacity, count, countItem, deleteSlot, maxHp, maxStamina, perk, readSlot, saveSettings, sellValue, settings, splitKey, totalWeight, zoneIndex, type Save } from './state';
+import { RANK_TITLES, S, lvl, points, hotbar, keyLabel, usable, activeWeapon, addItem, ammoCap, buyPrice, canBuyPerk, capacity, count, countItem, deleteSlot, maxHp, maxStamina, perk, readSlot, saveSettings, sellValue, settings, splitKey, totalWeight, zoneIndex, type Save } from './state';
 import { MAP_SPAN } from './terrain';
 import { clamp, fmtTime, pick } from './util';
 import type { StationKind } from './world';
@@ -43,7 +43,8 @@ export class UI {
       <div id="mini"><canvas width="328" height="328"></canvas><div id="clock" class="hud-box"></div></div>
       <div id="status" class="hud-box"><div id="rank">1<small>Greenhorn</small></div><div class="bars">
         <div class="statline"><span id="hpt"></span><span class="wt" id="wt"></span><span class="coin" id="gold"></span></div>
-        <div class="bar hp"><i></i></div><div class="bar st"><i></i></div><div class="bar xp"><i></i></div></div></div>
+        <div class="bar hp"><i></i></div><div class="bar st"><i></i></div><div id="skills"></div></div></div>
+      <div id="xpfeed"></div><div id="lvflash"></div>
       <div id="buffs"></div><div id="weapons" class="hud-box"></div>
       <canvas id="cross" width="160" height="160"></canvas><div id="hitm"></div>
       <div id="clicker" class="hud-box hidden">Click to look around</div>
@@ -54,7 +55,7 @@ export class UI {
     this.root.append(this.fadeEl);
     const q = (s: string) => this.hud.querySelector(s) as HTMLElement;
     this.promptEl = q('#prompt'); this.hintEl = q('#hint'); this.bannerEl = q('#banner'); this.toastsEl = q('#toasts'); this.dmgEl = q('#dmg'); this.bossEl = q('#boss');
-    for (const id of ['buffs', 'clicker', 'objective', 'eye', 'rank', 'hpt', 'gold', 'wt', 'weapons', 'clock', 'lowhp', 'hurt', 'hitm', 'cross']) this.els[id] = q('#' + id);
+    for (const id of ['skills', 'xpfeed', 'lvflash', 'buffs', 'clicker', 'objective', 'eye', 'rank', 'hpt', 'gold', 'wt', 'weapons', 'clock', 'lowhp', 'hurt', 'hitm', 'cross']) this.els[id] = q('#' + id);
     this.mini = (q('#mini canvas') as HTMLCanvasElement).getContext('2d')!;
     this.comp = (q('#compass canvas') as HTMLCanvasElement).getContext('2d')!;
     this.cross = (q('#cross') as HTMLCanvasElement).getContext('2d')!;
@@ -80,6 +81,38 @@ export class UI {
     this.bannerEl.querySelector('h1')!.textContent = title;
     this.bannerEl.querySelector('p')!.textContent = sub;
     this.bannerEl.className = 'go ' + kind;
+  }
+  private xpCards: Partial<Record<Skill, { el: HTMLElement; total: number; timer: number }>> = {};
+  /** The moment of reward: a card slides in, the bar fills, and a level-up bursts. */
+  xpGain(k: Skill, n: number, before: { lv: number; xp: number }, levels: number) {
+    const meta = SKILLS[k], sk = S.skills[k];
+    let c = this.xpCards[k];
+    if (!c) {
+      const el = $(`<div class="xpcard hud-box" style="--c:${meta.color}">${icon(meta.icon, meta.color, 38)}<div class="mid"><div class="top"><b>${meta.name}</b><span class="lv"></span><span class="amt"></span></div><div class="bar"><i></i><u></u></div></div></div>`);
+      this.els.xpfeed.append(el);
+      c = this.xpCards[k] = { el, total: 0, timer: 0 };
+      (el.querySelector('.bar i') as HTMLElement).style.width = `${(before.xp / xpForLevel(before.lv)) * 100}%`;
+      void el.offsetWidth;
+    }
+    c.total += n;
+    clearTimeout(c.timer);
+    const el = c.el, bar = el.querySelector('.bar i') as HTMLElement, lvEl = el.querySelector('.lv') as HTMLElement, amt = el.querySelector('.amt') as HTMLElement;
+    amt.textContent = `+${c.total} XP`;
+    amt.classList.remove('pop'); void amt.offsetWidth; amt.classList.add('pop');
+    el.classList.remove('sweep'); void el.offsetWidth; el.classList.add('sweep');
+    const settle = () => { lvEl.textContent = `Lv ${sk.lv}`; bar.style.width = sk.lv >= MAX_LEVEL ? '100%' : `${(sk.xp / xpForLevel(sk.lv)) * 100}%`; };
+    if (levels > 0) {
+      lvEl.textContent = `Lv ${before.lv}`;
+      bar.style.width = '100%';
+      setTimeout(() => {
+        el.classList.add('up');
+        bar.style.transition = 'none'; bar.style.width = '0%'; void bar.offsetWidth; bar.style.transition = '';
+        settle();
+        const f = this.els.lvflash; f.style.setProperty('--c', meta.color); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+      }, 420);
+    } else settle();
+    const card = c;
+    c.timer = window.setTimeout(() => { el.classList.add('out'); setTimeout(() => { el.remove(); if (this.xpCards[k] === card) delete this.xpCards[k]; }, 400); }, levels > 0 ? 4200 : 2800);
   }
   hurtFlash() { const h = this.els.hurt; h.classList.add('go'); requestAnimationFrame(() => requestAnimationFrame(() => h.classList.remove('go'))); }
   hitMarker(kind: 'hit' | 'crit' | 'kill') {
@@ -140,15 +173,14 @@ export class UI {
     const hp = Math.ceil(S.hp), mh = maxHp();
     this.set('hp', `${hp}/${mh}`, (v) => { e.hpt.textContent = `♥ ${v}`; (this.hud.querySelector('.bar.hp i') as HTMLElement).style.width = `${(hp / mh) * 100}%`; });
     this.set('st', Math.round((p.stamina / maxStamina()) * 50), (v) => { (this.hud.querySelector('.bar.st i') as HTMLElement).style.width = `${+v * 2}%`; });
-    const need = xpForLevel(S.level);
-    this.set('xp', `${S.level}:${S.xp}`, () => {
-      (this.hud.querySelector('.bar.xp i') as HTMLElement).style.width = S.level >= MAX_LEVEL ? '100%' : `${(S.xp / need) * 100}%`;
-      e.rank.innerHTML = `${S.level}<small>${RANK_TITLES[S.level]}</small>`;
+    this.set('xp', SKILL_ORDER.map((k) => `${S.skills[k].lv}:${S.skills[k].xp}`).join(), () => {
+      e.rank.innerHTML = `${lvl('hunting')}<small>${RANK_TITLES[lvl('hunting')]}</small>`;
+      e.skills.innerHTML = SKILL_ORDER.map((k) => { const sk = S.skills[k]; return `<div class="sk" style="--c:${SKILLS[k].color}">${icon(SKILLS[k].icon, SKILLS[k].color, 17)}<b>${sk.lv}</b><div class="bar"><i style="width:${sk.lv >= MAX_LEVEL ? 100 : (sk.xp / xpForLevel(sk.lv)) * 100}%"></i></div></div>`; }).join('');
     });
     this.set('gold', S.gold, (v) => { e.gold.innerHTML = coin(+v); });
     const w = totalWeight(), cap = capacity();
     this.set('wt', `${w}/${cap}`, (v) => { e.wt.textContent = w > cap * 0.7 ? `Pack ${v}` : ''; e.wt.classList.toggle('over', w > cap); });
-    this.set('obj', G.game.objective() + (S.perkPoints ? `|${S.perkPoints}` : ''), () => { e.objective.querySelector('span')!.innerHTML = G.game.objective() + (S.perkPoints ? `<br><span style="color:#ffe070">★ Skill point ready — Tab</span>` : ''); });
+    this.set('obj', G.game.objective() + `|${points()}`, () => { e.objective.querySelector('span')!.innerHTML = G.game.objective() + (points() ? `<br><span style="color:#ffe070">★ Skill point ready — Tab</span>` : ''); });
     this.set('clock', `${Math.floor(S.time * 6)}|${G.env.night > 0.5}`, () => { e.clock.innerHTML = `${icon(G.env.night > 0.5 ? 'moon' : 'sun', '#ffd866', 18)} ${fmtTime(S.time)}`; });
     e.lowhp.style.opacity = String(hp < mh * 0.3 ? 0.5 + Math.sin(G.time * 5) * 0.3 : 0);
     // hotbar
@@ -216,8 +248,9 @@ export class UI {
       c.fill(); c.stroke();
     });
     mark(t.town.x, t.town.z, '#ffe070', 'home');
+    if (t.home) mark(t.home.x, t.home.z, '#9ad86a', 'home');
     for (const a of G.animals.list) if (!a.alive && !a.skinned) mark(a.pos.x, a.pos.z, '#ff8a70', 'dot');
-    if (!S.legends.includes(G.zone.def.legendary) && S.level >= G.zone.def.rank + 2) mark(t.lair.x, t.lair.z, '#d070ff', 'skull');
+    if (!S.legends.includes(G.zone.def.legendary) && lvl('hunting') >= G.zone.def.rank + 2) mark(t.lair.x, t.lair.z, '#d070ff', 'skull');
     c.globalAlpha = 1; c.fillStyle = '#fff'; c.beginPath(); c.moveTo(W / 2 - 9, 0); c.lineTo(W / 2 + 9, 0); c.lineTo(W / 2, 12); c.fill();
   }
 
@@ -243,11 +276,12 @@ export class UI {
     c.setLineDash([]);
     for (const cp of t.camps) dot(cp.x, cp.z, follow ? 8 : 6, '#ff9a40');
     dot(t.town.x, t.town.z, follow ? 13 : 9, '#ffe070');
+    if (t.home) dot(t.home.x, t.home.z, follow ? 10 : 7, '#9ad86a');
     for (const a of G.animals.list) {
       if (!a.alive && !a.skinned) dot(a.pos.x, a.pos.z, follow ? 7 : 5, '#ff8a70');
       else if (a.alive && a.engaged && follow) dot(a.pos.x, a.pos.z, 7, '#e02818');
     }
-    if (!S.legends.includes(G.zone.def.legendary) && (S.level >= G.zone.def.rank + 2 || !follow)) dot(t.lair.x, t.lair.z, follow ? 10 : 8, '#d070ff');
+    if (!S.legends.includes(G.zone.def.legendary) && (lvl('hunting') >= G.zone.def.rank + 2 || !follow)) dot(t.lair.x, t.lair.z, follow ? 10 : 8, '#d070ff');
     // player arrow
     c.translate(X(p.pos.x), Y(p.pos.z));
     c.rotate(-p.camYaw);
@@ -372,6 +406,7 @@ export class UI {
       case 'cauldron': return this.renderCauldron();
       case 'fishmonger': return this.renderFishmonger();
       case 'lodge': return this.renderLodge();
+      case 'trapper': return this.renderTrapper();
       case 'journal': return this.renderJournal();
       case 'pause': return this.renderPause();
       case 'options': return this.renderOptions();
@@ -462,10 +497,10 @@ export class UI {
     body.append(book, mid);
     let last = '';
     for (const r of RECIPES) {
-      if (r.rank > S.level + 2) continue;
+      if (r.rank > lvl('crafting') + 2) continue;
       if (r.section !== last) { last = r.section; book.append($(`<h3 class="sec">${r.section}</h3>`)); }
       const owned = (r.out.gear && G.game.ownsGear(r.out.gear)) || (r.out.weapon && S.weapons.includes(r.out.weapon));
-      const locked = S.level < r.rank, can = G.game.canCraft(r);
+      const locked = lvl('crafting') < r.rank, can = G.game.canCraft(r);
       const ic = r.out.item ? itemIcon(r.out.item, 30) : r.out.gear ? icon(GEAR[r.out.gear].icon, GEAR[r.out.gear].color, 30) : icon(WEAPONS[r.out.weapon!].kind === 'bow' ? 'bow' : 'crossbow', WEAPONS[r.out.weapon!].color, 30);
       const b = $(`<button class="rec ${this.recipeSel === r ? 'sel' : ''} ${can ? 'can' : ''} ${owned || locked ? 'dim' : ''}">${ic}<span>${r.name}</span><em>${owned ? '✓' : locked ? `Rank ${r.rank}` : can ? '●' : ''}</em></button>`);
       b.addEventListener('click', () => { this.recipeSel = r; this.grid = patternCells(r.pattern); audio.play('ui_page'); this.render(); });
@@ -486,7 +521,7 @@ export class UI {
     if (match) {
       const o = match.out, ic = o.item ? itemIcon(o.item, 60) : o.gear ? icon(GEAR[o.gear].icon, GEAR[o.gear].color, 60) : icon(WEAPONS[o.weapon!].kind === 'bow' ? 'bow' : 'crossbow', WEAPONS[o.weapon!].color, 60);
       const desc = o.item ? `Sells for ${coin(sellValue(o.item + ':1', S.zone))}` : o.gear ? GEAR[o.gear].desc : this.weaponStats(WEAPONS[o.weapon!]);
-      const why = S.level < match.rank ? `Needs Rank ${match.rank}` : (o.gear && G.game.ownsGear(o.gear)) || (o.weapon && S.weapons.includes(o.weapon)) ? 'Already owned' : !G.game.canCraft(match) ? 'Missing materials' : '';
+      const why = lvl('crafting') < match.rank ? `Needs Crafting ${match.rank}` : (o.gear && G.game.ownsGear(o.gear)) || (o.weapon && S.weapons.includes(o.weapon)) ? 'Already owned' : !G.game.canCraft(match) ? 'Missing materials' : '';
       outEl.innerHTML = `<div class="cell big">${ic}</div><b>${match.name}</b><small>${why ? `<span style="color:#b03020">${why}</span>` : desc}</small>`;
       const r = match;
       outEl.append(this.btn('Craft', () => this.startMini({ title: `Stitching the ${r.name.toLowerCase()}`, kind: 'stitch', strokes: 4, speed: 0.6 + r.rank * 0.02, color: ITEMS[r.needs[0][0]].color,
@@ -519,7 +554,7 @@ export class UI {
     body.append(st);
   }
   private renderBedroll() {
-    const { body } = this.frame('Bedroll', [], true);
+    const { body } = this.frame(G.game.focus?.kind === 'station' ? G.game.focus.station.name : 'Bedroll', [], true);
     const st = $('<div class="stack" style="flex:1"><div class="say">Sleeping heals you and saves the game.</div></div>');
     st.append(this.btn('Rest until morning', () => G.game.sleep(0)), this.btn('Leave', () => this.close(), 'alt'));
     body.append(st);
@@ -588,6 +623,24 @@ export class UI {
     const caught = Object.entries(S.fish ?? {});
     if (caught.length) { col.append($('<h3 class="sec">Your catches</h3>')); for (const [id, n] of caught) col.append($(`<div class="kv"><span>${ITEMS[id].name}</span><span>${n}</span></div>`)); }
   }
+  private renderTrapper() {
+    const { body } = this.frame(this.npcName('trapper'), []);
+    const col = $('<div class="col"></div>');
+    body.append(col);
+    const pelts = Object.keys(S.inv).filter((k) => { const sp = Object.values(SPECIES).find((x) => x.hide === splitKey(k)[0]); return !!sp?.small; });
+    const price = (k: string) => Math.round(sellValue(k, S.zone) / 0.6);
+    const top = $('<div class="row" style="background:none"><div class="nm"><small>Pays fair coin for rabbit and squirrel pelts</small></div></div>');
+    top.append(this.btn(`Sell all pelts (${coin(pelts.reduce((n, k) => n + price(k) * count(k), 0))})`, () => { pelts.forEach((k) => G.game.sellPelt(k, count(k))); this.render(); }, '', !pelts.length));
+    col.append(top);
+    if (!pelts.length) col.append($('<p class="muted">“Bring me rabbit or squirrel pelts and I’ll see you right.”</p>'));
+    for (const k of pelts) col.append(this.rowEl(itemIcon(k), `${ITEMS[splitKey(k)[0]].name} ${keyTag(k)}`, `×${count(k)}`, coin(price(k)), [this.btn('Sell 1', () => { G.game.sellPelt(k, 1); this.render(); }, 'alt')]));
+    col.append($('<h3 class="sec">Marn’s wares</h3>'));
+    for (const id of G.game.shopStock('trapper')) {
+      const it = ITEMS[id], pr = buyPrice(id), one = id === 'rod0';
+      col.append(this.rowEl(itemIcon(id), it.name, `${it.desc} · have ${count(id)}`, coin(pr), one ? [this.btn('Buy', () => { G.game.buy(id, 1); this.render(); }, '', S.gold < pr)]
+        : [this.btn('Buy 1', () => { G.game.buy(id, 1); this.render(); }, 'alt', S.gold < pr), this.btn('Buy 5', () => { G.game.buy(id, 5); this.render(); }, '', S.gold < pr * 5)]));
+    }
+  }
   private renderLodge() {
     const { body } = this.frame(this.npcName('lodge'), []);
     const col = $('<div class="col"></div>');
@@ -627,10 +680,10 @@ export class UI {
     const col = $('<div class="col"></div>');
     body.append(col);
         for (const id of ZONE_ORDER) {
-      const z = ZONES[id], here = id === S.zone, locked = S.level < z.rank;
+      const z = ZONES[id], here = id === S.zone, locked = lvl('hunting') < z.rank;
       const animals = z.spawns.map((s) => SPECIES[s[0]].name).join(', ');
       col.append(this.rowEl(icon(here ? 'map' : locked ? 'lock' : 'wagon', locked ? '#8a7a6a' : '#99643a', 38), `${z.name} <span class="tag">${z.town}</span>`, animals,
-        here ? '<span class="tag up">you are here</span>' : locked ? `Rank ${z.rank}` : z.fare ? coin(z.fare) : 'Free', [this.btn('Travel', () => G.game.travel(id), '', here || locked || S.gold < z.fare)]));
+        here ? '<span class="tag up">you are here</span>' : locked ? `Hunting ${z.rank}` : z.fare ? coin(z.fare) : 'Free', [this.btn('Travel', () => G.game.travel(id), '', here || locked || S.gold < z.fare)]));
     }
   }
 
@@ -700,12 +753,16 @@ export class UI {
     } else if (this.tab === 'Codex') {
       this.renderCodex(body, col);
     } else if (this.tab === 'Skills') {
-      col.append($(`<h3 class="sec">${S.perkPoints} skill point${S.perkPoints === 1 ? '' : 's'} · Rank ${S.level} ${RANK_TITLES[S.level]}</h3>`));
-      for (const p of PERKS) {
-        const n = perk(p.id);
-        const row = $(`<div class="perk"><div class="ic">${icon(p.icon, '#c79a3c', 36)}</div><div class="nm" style="flex:1"><b>${p.name}</b><br><span class="muted">${p.desc(Math.max(1, Math.min(p.max, n + (n < p.max ? 1 : 0))))}</span></div><div class="pips">${Array.from({ length: p.max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div></div>`);
-        row.append(this.btn(n >= p.max ? 'Max' : 'Learn', () => { if (canBuyPerk(p.id)) { S.perks[p.id] = n + 1; S.perkPoints--; audio.play('quest'); this.render(); } }, '', !canBuyPerk(p.id)));
-        col.append(row);
+      for (const k of SKILL_ORDER) {
+        const sk = S.skills[k], meta = SKILLS[k], need = xpForLevel(sk.lv);
+        col.append($(`<div class="skillhead" style="--c:${meta.color}">${icon(meta.icon, meta.color, 44)}<div class="lv">${sk.lv}</div><div class="nm"><b>${meta.name}${k === 'hunting' ? ` · ${RANK_TITLES[sk.lv]}` : ''}</b><span class="muted">${meta.blurb}</span>
+          <div class="bar"><i style="width:${sk.lv >= MAX_LEVEL ? 100 : (sk.xp / need) * 100}%"></i></div></div><div class="pts ${sk.pts ? 'has' : ''}">${sk.lv >= MAX_LEVEL ? 'MAX' : `${sk.xp} / ${need}`}<small>${sk.pts} point${sk.pts === 1 ? '' : 's'}</small></div></div>`));
+        for (const p of PERKS.filter((x) => x.skill === k)) {
+          const n = perk(p.id);
+          const row = $(`<div class="perk"><div class="ic">${icon(p.icon, meta.color, 32)}</div><div class="nm" style="flex:1"><b>${p.name}</b><br><span class="muted">${p.desc(Math.max(1, Math.min(p.max, n + (n < p.max ? 1 : 0))))}</span></div><div class="pips">${Array.from({ length: p.max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div></div>`);
+          row.append(this.btn(n >= p.max ? 'Max' : 'Learn', () => { if (canBuyPerk(p.id)) { S.perks[p.id] = n + 1; sk.pts--; audio.play('quest'); this.render(); } }, '', !canBuyPerk(p.id)));
+          col.append(row);
+        }
       }
     } else {
       col.style.display = 'flex'; col.style.gap = '18px';
@@ -719,7 +776,7 @@ export class UI {
       side.append($('<h3 class="sec">Game here</h3>'));
       for (const id of [...new Set(z.spawns.map((s) => s[0])), z.legendary]) { const sp = SPECIES[id]; side.append($(`<div class="kv"><span>${sp.legendary ? '★ ' : ''}${sp.name}</span><span>${S.kills[id] ?? 0} taken</span></div>`)); }
       side.append($('<h3 class="sec">Regions</h3>'));
-      for (const id of ZONE_ORDER) side.append($(`<div class="kv"><span>${ZONES[id].name}</span><span>${S.level >= ZONES[id].rank ? (S.legends.includes(ZONES[id].legendary) ? '★' : 'open') : `Rank ${ZONES[id].rank}`}</span></div>`));
+      for (const id of ZONE_ORDER) side.append($(`<div class="kv"><span>${ZONES[id].name}</span><span>${lvl('hunting') >= ZONES[id].rank ? (S.legends.includes(ZONES[id].legendary) ? '★' : 'open') : `Hunting ${ZONES[id].rank}`}</span></div>`));
       col.append(side);
     }
   }
@@ -742,7 +799,7 @@ export class UI {
       const r = RECIPES.find(pred);
       if (!r) return '';
       const cells = patternCells(r.pattern);
-      return `<h3 class="sec" style="margin-top:12px">Pattern · Rank ${r.rank}</h3><div class="minigrid">${cells.map((c) => `<i>${c ? itemIcon(c, 26) : ''}</i>`).join('')}</div>`;
+      return `<h3 class="sec" style="margin-top:12px">Pattern · Crafting ${r.rank}</h3><div class="minigrid">${cells.map((c) => `<i>${c ? itemIcon(c, 26) : ''}</i>`).join('')}</div>`;
     };
     const itemEntry = (id: string, known = true, extra = ''): Entry => { const it = ITEMS[id]; return { id, ic: itemIcon(id, 44), name: it.name, known, html: () => `<p>${it.desc}</p>${kv('Base value', coin(it.value))}${it.buy ? kv('Sold by merchants for', coin(buyPrice(id))) : ''}${kv('Weight', it.cat === 'ammo' ? '—' : it.weight)}${extra}` }; };
     let list: Entry[] = [];
@@ -756,7 +813,7 @@ export class UI {
     else if (this.codexCat === 'Goods') list = Object.values(ITEMS).filter((it) => it.cat === 'goods').map((it) => itemEntry(it.id, true, recipeFor((r) => r.out.item === it.id)));
     else if (this.codexCat === 'Gear') list = Object.values(GEAR).filter((g) => g.tier > 0).map((g) => ({ id: g.id, ic: icon(g.icon, g.color, 44), name: g.name, known: true, html: () => `<p>${g.desc}</p>${kv('Slot', g.slot)}${kv('Owned', G.game.ownsGear(g.id) ? 'yes' : 'no')}${recipeFor((r) => r.out.gear === g.id)}` }));
     else list = Object.values(WEAPONS).map((w) => ({ id: w.id, ic: icon(w.kind === 'bow' ? 'bow' : w.kind === 'crossbow' ? 'crossbow' : ITEMS[w.ammo].icon, w.color, 44), name: w.name, known: true,
-      html: () => `<p>${w.desc}</p>${kv('Damage', w.damage)}${kv(w.kind === 'bow' ? 'Draw' : w.kind === 'crossbow' ? 'Reload' : 'Throw', w.time + 's')}${kv('Speed', w.speed)}${kv('Ammunition', ITEMS[w.ammo].name)}${kv('From', w.kind === 'thrown' ? 'Fletchers (buy the ammunition)' : w.price ? `Fletchers from ${ZONES[ZONE_ORDER[w.zone]].town} · ${w.price} coin` : 'Crafted')}${recipeFor((r) => r.out.weapon === w.id)}` }));
+      html: () => `<p>${w.desc}</p>${kv('Damage', w.damage)}${kv(w.kind === 'bow' ? 'Draw' : w.kind === 'crossbow' ? 'Reload' : 'Throw', w.time + 's')}${kv('Speed', w.speed)}${kv('Ammunition', ITEMS[w.ammo].name)}${kv('From', w.kind === 'thrown' ? w.weak ? 'Old Marn and fletchers (buy the spears)' : 'Fletchers (buy the ammunition)' : w.price ? `Fletchers from ${ZONES[ZONE_ORDER[w.zone]].town} · ${w.price} coin` : 'Crafted')}${recipeFor((r) => r.out.weapon === w.id)}` }));
     const grid = $('<div class="grid"></div>');
     if (!list.some((e) => e.id === this.codexSel)) this.codexSel = (list.find((e) => e.known) ?? list[0])?.id ?? '';
     for (const en of list) {
@@ -882,7 +939,7 @@ export class UI {
     const st = el.querySelector('.stack')!;
     for (let i = 0; i < 3; i++) {
       const s = readSlot(i);
-      const row = $(`<div class="slot">${icon(s ? 'scroll' : 'star', '#c79a3c', 44)}<div class="info"><b>${s ? s.name : `Empty journal ${i + 1}`}</b>${s ? `Rank ${s.level} ${RANK_TITLES[s.level]} · ${ZONES[s.zone].town} · Day ${s.day} · ${s.gold} coin · ${Math.floor(s.stats.playtime / 60)} min` : 'Begin a new hunt'}</div></div>`);
+      const row = $(`<div class="slot">${icon(s ? 'scroll' : 'star', '#c79a3c', 44)}<div class="info"><b>${s ? s.name : `Empty journal ${i + 1}`}</b>${s ? `${RANK_TITLES[s.skills.hunting.lv]} · Hunting ${s.skills.hunting.lv} · Fishing ${s.skills.fishing.lv} · Crafting ${s.skills.crafting.lv} · ${ZONES[s.zone].town} · Day ${s.day} · ${s.gold} coin · ${Math.floor(s.stats.playtime / 60)} min` : 'Begin a new hunt'}</div></div>`);
       row.append(this.btn(s ? 'Continue' : 'New Game', () => { el.remove(); this.overlay = null; this.titleEl?.remove(); this.titleEl = null; this.startCb?.(i, s, ['Wren', 'Ash', 'Rowan'][i]); }));
       if (s) row.append(this.btn('Erase', () => { if (confirm(`Erase ${s.name}'s journal? This cannot be undone.`)) { deleteSlot(i); this.fileSelect(); } }, 'red'));
       st.append(row);

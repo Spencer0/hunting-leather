@@ -2,10 +2,11 @@
 import * as THREE from 'three';
 import { clips, model, uniqueMaterials } from './assets';
 import { audio } from './audio';
+import { animateCritter, buildCritter, type Critter } from './critters';
 import { G } from './ctx';
 import { SPECIES, type SpeciesDef } from './data';
 import { S, perk } from './state';
-import { PLAY, TOWN_R } from './terrain';
+import { PLAY, TOWN_R, WATER_Y } from './terrain';
 import { angleDiff, clamp, damp, rng } from './util';
 import type { Zone } from './world';
 
@@ -62,10 +63,13 @@ export class Animal {
   scale: number;
   private pitch = 0; private dustT = 0;
   engaged = false;
+  near: [number, number] | null = null; // respawn around this point (the cabin's rabbits)
+  private crit: Critter | null = null;
 
   constructor(public def: SpeciesDef, x: number, z: number, private zone: Zone) {
-    const m = measure(def);
-    this.obj = model('animals/' + def.model);
+    if (def.proc) this.crit = buildCritter(def.proc);
+    const m = this.crit ? { scalePer: 1, nativeH: 0.62, nativeLen: 1 } : measure(def);
+    this.obj = this.crit ? this.crit.obj : model('animals/' + def.model);
     this.scale = def.anim === 'biped' ? def.length / m.nativeH : def.length / m.nativeLen;
     this.obj.scale.setScalar(this.scale);
     this.height = m.nativeH * this.scale;
@@ -84,7 +88,7 @@ export class Animal {
     }
     this.obj.traverse((o) => { const sm = o as THREE.SkinnedMesh; if (sm.isSkinnedMesh) sm.frustumCulled = false; });
     this.mixer = new THREE.AnimationMixer(this.obj);
-    const all = clips('animals/' + def.model);
+    const all = this.crit ? [] : clips('animals/' + def.model);
     for (const key in CLIPS) {
       for (const name of CLIPS[key]) {
         const c = all.find((cl) => cl.name === name);
@@ -100,6 +104,7 @@ export class Animal {
   }
 
   private anim(key: string, fade = 0.25, once = false, speed = 1) {
+    if (this.crit) { this.cur = key; return; }
     const a = this.acts.get(key);
     if (!a) return;
     if (this.cur === key && !once) { a.timeScale = speed; return; }
@@ -127,6 +132,10 @@ export class Animal {
       this.bHead.getWorldPosition(this.head); this.bChest.getWorldPosition(this.chest); this.bRear.getWorldPosition(this.rear);
       // nudge the head sphere toward the muzzle
       this.head.x += fx * L * 0.06; this.head.z += fz * L * 0.06;
+    } else if (this.crit) {
+      this.head.set(this.pos.x + fx * L * 0.3, this.pos.y + L * 0.42, this.pos.z + fz * L * 0.3);
+      this.chest.set(this.pos.x + fx * L * 0.14, this.pos.y + L * 0.26, this.pos.z + fz * L * 0.14);
+      this.rear.set(this.pos.x - fx * L * 0.2, this.pos.y + L * 0.24, this.pos.z - fz * L * 0.2);
     } else {
       this.head.copy(this.pos).setY(this.pos.y + this.height * 0.86);
       this.chest.copy(this.pos).setY(this.pos.y + this.height * 0.6);
@@ -191,7 +200,7 @@ export class Animal {
   }
   private react(d: number) {
     const b = this.def.behaviour;
-    if (b === 'prey' || b === 'skittish') { audio.play('snort', { pos: this.pos, volume: 0.7 }); this.startFlee(); this.alertGroup('flee'); }
+    if (b === 'prey' || b === 'skittish') { audio.play('snort', { pos: this.pos, volume: this.def.small ? 0.25 : 0.7, rate: this.def.small ? 2.4 : 1 }); this.startFlee(); this.alertGroup('flee'); }
     else if (b === 'predator') this.startChase();
     else if (b === 'boss') { if (d < 55) this.startChase(); }
     else if (d < 13) this.startChase();
@@ -228,7 +237,7 @@ export class Animal {
   private die() {
     this.state = 'dead'; this.deadT = 0; this.speed = 0; this.engaged = false;
     this.anim('death', 0.12, true);
-    audio.play('animal_death', { pos: this.pos });
+    audio.play('animal_death', { pos: this.pos, volume: this.def.small ? 0.4 : 1, rate: this.def.small ? 2 : 1 });
     if (this.def.behaviour === 'prey' || this.def.behaviour === 'skittish') this.alertGroup('flee');
     else this.alertGroup('chase');
   }
@@ -237,6 +246,7 @@ export class Animal {
     const p = G.player, d = this.pos.distanceTo(p.pos);
     if (this.state === 'dead') {
       this.deadT += dt;
+      if (this.crit && d < 140) animateCritter(this.crit, 'dead', 0, this.def.length, G.time, dt);
       if (d < 140) this.mixer.update(dt);
       if (this.skinned) {
         // carcass sinks away after skinning
@@ -272,7 +282,7 @@ export class Animal {
           if (Math.random() < 0.55) {
             this.state = 'wander';
             for (let i = 0; i < 6; i++) {
-              const a = Math.random() * 6.28, r = 8 + Math.random() * 26;
+              const a = Math.random() * 6.28, r = this.def.small ? 3 + Math.random() * 9 : 8 + Math.random() * 26;
               this.goal.set(this.home.x + Math.cos(a) * r, this.home.y * 0 + this.home.z + Math.sin(a) * r);
               if (this.ok(this.goal.x, this.goal.y)) break;
               this.goal.set(this.pos.x, this.pos.z);
@@ -308,7 +318,7 @@ export class Animal {
         const sp = this.def.speed * wounded * (this.panic > 0 ? 1.08 : 1);
         if (!this.move(this.fleeYaw, sp, dt, 4.5)) this.fleeYaw = this.pickEscape(p.pos);
         this.anim('run', 0.15, false, clamp(this.speed / this.def.speed, 0.6, 1.3) * 1.15);
-        if ((d > 85 && this.t > 4) || this.t > 16) { this.state = 'idle'; this.timer = 4 + Math.random() * 4; this.meter = 0.4; this.home.copy(this.pos); this.anim('look', 0.4); }
+        if ((d > (this.def.small ? 26 : 85) && this.t > (this.def.small ? 2 : 4)) || this.t > (this.def.small ? 7 : 16)) { this.state = 'idle'; this.timer = 4 + Math.random() * 4; this.meter = 0.4; this.home.copy(this.pos); this.anim('look', 0.4); }
         break;
       }
       case 'chase': {
@@ -374,9 +384,11 @@ export class Animal {
     this.place();
     if (this.speed > 5 && d < 70) {
       this.dustT -= dt;
-      if (this.dustT <= 0) { this.dustT = 0.16; G.fx.dust(this.pos); }
+      if (this.dustT <= 0) { this.dustT = this.def.small ? 0.3 : 0.16; G.fx.dust(this.pos); }
     }
-    if (d < 130) this.mixer.update(dt);
+    if (this.crit) {
+      if (d < 130) animateCritter(this.crit, this.cur === 'eat' ? 'eat' : this.cur === 'look' ? 'look' : this.cur === 'walk' || this.cur === 'run' ? 'move' : 'idle', this.speed, this.def.length, G.time, dt);
+    } else if (d < 130) this.mixer.update(dt);
   }
 }
 
@@ -405,7 +417,7 @@ function segSegClosest(p1: THREE.Vector3, q1: THREE.Vector3, p2: THREE.Vector3, 
 export class Animals {
   list: Animal[] = [];
   group = new THREE.Group();
-  private respawns: { id: string; t: number }[] = [];
+  private respawns: { id: string; t: number; near: [number, number] | null }[] = [];
   private zone!: Zone;
   private r = rng(1);
 
@@ -422,10 +434,22 @@ export class Animals {
     }
     return null;
   }
-  private spawnGroup(id: string, minPlayer: number) {
+  /** A walkable spot in a ring around a point (used to keep small game around the cabin). */
+  private ring(cx: number, cz: number, r0: number, r1: number, minPlayer: number): [number, number] | null {
+    const t = this.zone.terrain;
+    for (let i = 0; i < 60; i++) {
+      const ang = Math.random() * 6.28, rad = r0 + Math.random() * (r1 - r0);
+      const x = cx + Math.cos(ang) * rad, z = cz + Math.sin(ang) * rad;
+      if (!t.walkable(x, z) || t.height(x, z) < WATER_Y + 0.3 || Math.hypot(x - t.town.x, z - t.town.z) < TOWN_R + 20) continue;
+      if (G.player && Math.hypot(x - G.player.pos.x, z - G.player.pos.z) < minPlayer) continue;
+      return [x, z];
+    }
+    return null;
+  }
+  private spawnGroup(id: string, minPlayer: number, near: [number, number] | null = null) {
     const def = SPECIES[id], t = this.zone.terrain;
     const others = this.list.filter((a) => a.alive).map((a) => a.home);
-    const a = this.anchor(minPlayer, others, 38) ?? this.anchor(minPlayer, [], 0);
+    const a = near ? this.ring(near[0], near[1], 16, 52, minPlayer) : this.anchor(def.small ? Math.min(minPlayer, 45) : minPlayer, others, 38) ?? this.anchor(minPlayer, [], 0);
     if (!a) return;
     const n = def.pack ? def.pack[0] + Math.floor(Math.random() * (def.pack[1] - def.pack[0] + 1)) : 1;
     const gid = Math.floor(Math.random() * 1e9);
@@ -438,7 +462,7 @@ export class Animals {
         x = a[0]; z = a[1];
       }
       const an = new Animal(def, x, z, this.zone);
-      an.group = gid;
+      an.group = gid; an.near = near;
       this.list.push(an);
       this.group.add(an.obj);
     }
@@ -447,6 +471,8 @@ export class Animals {
     this.clear();
     this.zone = zone;
     for (const [id, groups] of zone.def.spawns) for (let g = 0; g < groups; g++) this.spawnGroup(id, 60);
+    const h = zone.terrain.home;
+    if (h) for (const id of ['rabbit', 'squirrel', 'rabbit', 'squirrel', 'rabbit']) this.spawnGroup(id, 12, [h.x, h.z]);
     if (!S.legends.includes(zone.def.legendary)) {
       const l = zone.terrain.lair;
       const an = new Animal(SPECIES[zone.def.legendary], l.x, l.z, zone);
@@ -468,13 +494,13 @@ export class Animals {
         this.list.splice(i, 1);
         if (!a.def.legendary) {
           // respawn the whole group once its last member is gone
-          if (!this.list.some((o) => o.group === a.group)) this.respawns.push({ id: a.def.id, t: 70 + Math.random() * 60 });
+          if (!this.list.some((o) => o.group === a.group)) this.respawns.push({ id: a.def.id, t: (a.def.small ? 40 : 70) + Math.random() * 60, near: a.near });
         }
       }
     }
     for (let i = this.respawns.length - 1; i >= 0; i--) {
       this.respawns[i].t -= dt;
-      if (this.respawns[i].t <= 0) { this.spawnGroup(this.respawns[i].id, 95); this.respawns.splice(i, 1); }
+      if (this.respawns[i].t <= 0) { this.spawnGroup(this.respawns[i].id, this.respawns[i].near ? 30 : 95, this.respawns[i].near); this.respawns.splice(i, 1); }
     }
   }
   /** Highest awareness among nearby living animals (for the HUD eye) and whether any is hunting the player. */
@@ -500,7 +526,8 @@ export class Animals {
       an.bones();
       const L = an.def.length;
       const biped = an.def.anim === 'biped';
-      const rHead = biped ? L * 0.14 : L * 0.125, rBody = biped ? L * 0.2 : L * (an.def.model === 'Bull' || an.def.model === 'Cow' ? 0.2 : 0.17);
+      const small = an.def.small;
+      const rHead = small ? 0.17 : biped ? L * 0.14 : L * 0.125, rBody = small ? 0.22 : biped ? L * 0.2 : L * (an.def.model === 'Bull' || an.def.model === 'Cow' ? 0.2 : 0.17);
       // head
       const t1 = clamp(_d.subVectors(an.head, a).dot(_a.subVectors(b, a)) / (segLen * segLen || 1), 0, 1);
       _c.copy(a).addScaledVector(_a.subVectors(b, a), t1);

@@ -1,5 +1,7 @@
 // Persistent player state, inventory helpers and save slots.
-import { GEAR, GOODS_MULT, ITEMS, MAX_LEVEL, PERKS, QUALITY_MULT, WEAPONS, ZONES, ZONE_ORDER, xpForLevel, type GearSlot, type Quality } from './data';
+import { GEAR, GOODS_MULT, ITEMS, MAX_LEVEL, PERKS, QUALITY_MULT, SKILL_ORDER, WEAPONS, ZONES, ZONE_ORDER, xpForLevel, type GearSlot, type Quality, type Skill } from './data';
+
+export interface SkillState { lv: number; xp: number; pts: number }
 
 export interface Contract {
   id: number; zone: string; kind: 'hide' | 'goods' | 'hunt';
@@ -11,7 +13,8 @@ export interface Save {
   v: number;
   name: string;
   zone: string;
-  level: number; xp: number; perkPoints: number; perks: Record<string, number>;
+  skills: Record<Skill, SkillState>;
+  perks: Record<string, number>;
   gold: number; hp: number;
   inv: Record<string, number>; // key: itemId or itemId:quality for hides
   gear: Record<GearSlot, string>;
@@ -39,6 +42,8 @@ export interface Save {
 export interface Settings { master: number; music: number; sfx: number; sens: number; invertY: boolean; quality: number; shake: boolean; hotkeys: string[] }
 export const settings: Settings = { master: 0.8, music: 0.6, sfx: 0.9, sens: 1, invertY: false, quality: 2, shake: true, hotkeys: ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'] };
 
+/** Bump on any change to the save format; older saves are deleted on sight. */
+export const SAVE_VERSION = 2;
 const SKEY = 'hidebound.settings';
 const SAVEKEY = (i: number) => `hidebound.save.${i}`;
 try {
@@ -51,11 +56,12 @@ export function saveSettings() {
 
 export function newSave(name: string): Save {
   return {
-    v: 1, name, zone: 'greenhollow', level: 1, xp: 0, perkPoints: 0, perks: {}, gold: 25, hp: 100,
-    inv: { arrow: 20, knife: 6, salt: 4, thread: 4, tonic: 1, jerky: 2 },
-    hotbar: ['w0', 'w1', 'w2', 'tonic', 'jerky'], buffs: {}, lore: {}, brewed: {}, picked: {},
+    v: SAVE_VERSION, name, zone: 'greenhollow', perks: {}, gold: 0, hp: 100,
+    skills: { hunting: { lv: 1, xp: 0, pts: 0 }, fishing: { lv: 1, xp: 0, pts: 0 }, crafting: { lv: 1, xp: 0, pts: 0 } },
+    inv: { spear: 6, rod0: 1, jerky: 1 },
+    hotbar: ['w2', 'jerky', '', '', ''], buffs: {}, lore: {}, brewed: {}, picked: {},
     gear: { pack: 'pack0', quiver: 'quiver0', armor: 'armor0', boots: 'boots0', bracer: 'bracer0', knife: 'knife0' },
-    weapons: ['bow1'], slots: ['bow1', '', 'thr1'], active: 0, time: 8, day: 1, kills: {}, legends: [],
+    weapons: [], slots: ['', '', 'thr0'], active: 2, time: 8, day: 1, kills: {}, legends: [],
     contracts: [], contractSeq: 1, boardDay: {}, board: {}, flags: {},
     stats: { earned: 0, crafted: 0, skinned: 0, shots: 0, hits: 0, playtime: 0, deaths: 0 },
   };
@@ -70,10 +76,8 @@ export function readSlot(i: number): Save | null {
     const raw = localStorage.getItem(SAVEKEY(i));
     if (!raw) return null;
     const s = JSON.parse(raw) as Save;
-    if (s.v !== 1) return null;
-    s.hotbar = s.hotbar ?? ['w0', 'w1', 'w2', 'tonic', ''];
-    // older saves stored crafted goods without a grade
-    for (const k of Object.keys(s.inv)) if (!k.includes(':') && ITEMS[k]?.cat === 'goods') { s.inv[k + ':1'] = (s.inv[k + ':1'] ?? 0) + s.inv[k]; delete s.inv[k]; }
+    // no migrations: a save from any other version is simply discarded
+    if (s.v !== SAVE_VERSION) { localStorage.removeItem(SAVEKEY(i)); return null; }
     return s;
   } catch { return null; }
 }
@@ -87,8 +91,12 @@ export function deleteSlot(i: number) {
 // ---------- derived stats ----------
 export const perk = (id: string) => S.perks[id] ?? 0;
 export const gear = (slot: GearSlot) => GEAR[S.gear[slot]];
-export const maxHp = () => 100 + (S.level - 1) * 6 + perk('hardy') * 20;
-export const maxStamina = () => 100 + (S.level - 1) * 3 + perk('hardy') * 12;
+export const lvl = (k: Skill) => S.skills[k].lv;
+export const points = () => SKILL_ORDER.reduce((n, k) => n + S.skills[k].pts, 0);
+export const maxHp = () => 100 + (lvl('hunting') - 1) * 6 + perk('hardy') * 20;
+export const maxStamina = () => 100 + (lvl('hunting') - 1) * 3 + perk('hardy') * 12;
+export const hasRod = () => (S.inv.rod ?? 0) > 0 || (S.inv.rod0 ?? 0) > 0;
+export const goodRod = () => (S.inv.rod ?? 0) > 0;
 export const capacity = () => (gear('pack').capacity ?? 28) + perk('mule') * 12;
 export const ammoCap = () => gear('quiver').ammo ?? 20;
 export const buff = (e: string) => (S.buffs?.[e] ?? 0) > 0;
@@ -164,22 +172,23 @@ export const usable = (key: string) => /^w[012]$/.test(key) || key === 'tonic' |
 export const keyLabel = (code: string) => code.replace(/^Digit|^Key|^Numpad/, '').replace('ArrowUp', '↑').replace('ArrowDown', '↓').replace('ArrowLeft', '←').replace('ArrowRight', '→');
 export const zoneIndex = (z: string) => ZONE_ORDER.indexOf(z);
 
-/** Returns number of levels gained. */
-export function addXp(n: number): number {
+/** Add experience to one skill. Returns number of levels gained. */
+export function addXp(k: Skill, n: number): number {
+  const sk = S.skills[k];
   let gained = 0;
-  S.xp += Math.round(n);
-  while (S.level < MAX_LEVEL && S.xp >= xpForLevel(S.level)) {
-    S.xp -= xpForLevel(S.level);
-    S.level++;
-    S.perkPoints++;
+  sk.xp += Math.round(n);
+  while (sk.lv < MAX_LEVEL && sk.xp >= xpForLevel(sk.lv)) {
+    sk.xp -= xpForLevel(sk.lv);
+    sk.lv++;
+    sk.pts++;
     gained++;
   }
-  if (S.level >= MAX_LEVEL) S.xp = Math.min(S.xp, xpForLevel(MAX_LEVEL));
+  if (sk.lv >= MAX_LEVEL) sk.xp = Math.min(sk.xp, xpForLevel(MAX_LEVEL));
   return gained;
 }
 export function canBuyPerk(id: string) {
   const p = PERKS.find((x) => x.id === id)!;
-  return S.perkPoints > 0 && perk(id) < p.max;
+  return S.skills[p.skill].pts > 0 && perk(id) < p.max;
 }
 export function activeWeapon() {
   const id = S.slots[S.active];

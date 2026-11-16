@@ -3,10 +3,10 @@ import * as THREE from 'three';
 import { Animal, type HitInfo } from './animals';
 import { audio, type Mood } from './audio';
 import { G } from './ctx';
-import { ESSENCES, FISH, GEAR, GOODS_QUALITY, HERBS, ITEMS, type Essence, QUALITY_NAMES, RECIPES, SPECIES, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
+import { ESSENCES, FISH, GEAR, GOODS_QUALITY, HERBS, ITEMS, type Essence, QUALITY_NAMES, RECIPES, SKILLS, SPECIES, type Skill, TANNING, THROWN_BY_AMMO, TIPS, WEAPONS, ZONES, ZONE_ORDER, type Quality, type RecipeDef } from './data';
 import { input, rumble } from './input';
 import type { Shot } from './projectiles';
-import { S, buff, hotbar, maxStamina, addItem, addXp, ammoCap, buyPrice, capacity, count, countItem, invKey, maxHp, perk, removeAny, removeItem, sellValue, settings, skinBonus, splitKey, totalWeight, writeSave, zoneIndex, type Contract } from './state';
+import { S, buff, goodRod, hasRod, hotbar, lvl, maxStamina, addItem, addXp, ammoCap, buyPrice, capacity, count, countItem, invKey, maxHp, perk, removeAny, removeItem, sellValue, settings, skinBonus, splitKey, totalWeight, writeSave, zoneIndex, type Contract } from './state';
 import { WATER_Y } from './terrain';
 import { pick } from './util';
 import { Zone, type Station } from './world';
@@ -42,7 +42,11 @@ export class Game {
     G.env.setZone(def);
     S.zone = id;
     const t = G.zone.terrain;
-    G.player.teleport(t.town.x + 1.5, t.town.z + 24, Math.PI);
+    if (t.home && !S.flags.town) {
+      // the opening: step out of your cabin facing the fire, the trapper's camp and the pond
+      const pond = t.lakes[0], a = Math.atan2(pond.x - t.home.x, pond.z - t.home.z);
+      G.player.teleport(t.home.x + Math.sin(a) * 0.5, t.home.z + Math.cos(a) * 0.5, a);
+    } else G.player.teleport(t.town.x + 1.5, t.town.z + 24, Math.PI);
     G.player.cine = null;
     G.player.refreshBack();
     G.zone.refreshHerbs(S.picked?.[id]?.day === S.day ? S.picked[id].idx : []);
@@ -54,7 +58,7 @@ export class Game {
   }
   async travel(id: string) {
     const def = ZONES[id];
-    if (S.level < def.rank || S.gold < def.fare) return;
+    if (lvl('hunting') < def.rank || S.gold < def.fare) return;
     S.gold -= def.fare;
     G.ui.close();
     G.player.frozen = true;
@@ -76,23 +80,40 @@ export class Game {
   }
 
   // ---------- progression helpers ----------
-  gainXp(n: number, why?: string) {
-    const lv = addXp(n);
-    if (lv > 0) {
-      S.hp = maxHp();
+  gainXp(k: Skill, n: number) {
+    n = Math.round(n);
+    if (n <= 0) return;
+    const sk = S.skills[k], before = { lv: sk.lv, xp: sk.xp };
+    const up = addXp(k, n);
+    G.ui.xpGain(k, n, before, up);
+    if (up > 0) {
+      if (k === 'hunting') S.hp = maxHp();
       audio.play('levelup');
-      G.ui.banner(`Hunter Rank ${S.level}`, `Skill point earned${ZONE_ORDER.some((z) => ZONES[z].rank === S.level) ? ' — a new region is open to you' : ''}`, 'level');
-      if (!S.flags.hint_perk) { S.flags.hint_perk = true; G.ui.hint('Open your journal with <b>Tab</b> to spend skill points.', 9); }
+      const zone = k === 'hunting' ? ZONE_ORDER.find((z) => ZONES[z].rank > before.lv && ZONES[z].rank <= sk.lv) : null;
+      const pats = k === 'crafting' ? RECIPES.filter((r) => r.rank > before.lv && r.rank <= sk.lv).map((r) => r.name) : [];
+      const sub = zone ? `The road to ${ZONES[zone].name} is open` : pats.length ? `New pattern${pats.length > 1 ? 's' : ''}: ${pats.slice(0, 3).join(', ')}` : k === 'fishing' ? 'Rarer fish will take your hook' : k === 'hunting' ? 'Tougher, and harder to tire' : 'Skill point earned';
+      G.ui.banner(`${SKILLS[k].name} Level ${sk.lv}`, sub, 'level');
+      // a fountain of light in the skill's colour
+      const p = G.player.pos, col = new THREE.Color(SKILLS[k].color).getHex();
+      for (let i = 0; i < 46; i++) { const a = (i / 46) * Math.PI * 6, r = 0.5 + (i / 46) * 0.9; G.fx.emit(p.x + Math.cos(a) * r, p.y + 0.1 + (i / 46) * 0.4, p.z + Math.sin(a) * r, Math.cos(a) * 0.5, 2.2 + Math.random() * 1.6, Math.sin(a) * 0.5, 1.1 + Math.random() * 0.6, 0.16, i % 3 ? col : 0xffffff, 1, 0.8); }
+      rumble(0.4, 220);
+      if (!S.flags.hint_perk) { S.flags.hint_perk = true; G.ui.hint('Level up! Open your journal with <b>Tab</b> to learn a skill.', 9); }
     }
   }
   objective(): string {
     const f = S.flags;
-    if (!f.kill) return 'Hunt an animal in the meadows north of Fernwick';
+    if (!f.kill) return 'Hunt a rabbit or squirrel near your cabin';
     if (!f.skin) return 'Skin your kill — hold E beside it';
-    if (!f.tan) return 'Tan the hide at the tanning bench in town';
+    if (!f.trade) return 'Sell the pelt to Old Marn, the trapper camped by your cabin';
+    if (!f.bait) return 'Buy bait from Old Marn';
+    if (!f.fishc) return 'Cast a line at the pond past the trapper’s tent';
+    if (!f.town) return 'Follow the road to Fernwick and sell your catch to the merchant';
+    if (!f.big && !S.weapons.length) return 'Save 60 coin for a bow from Fernwick’s fletcher';
+    if (!f.big) return 'Hunt a deer in the meadows north of Fernwick';
+    if (!f.tan) return 'Tan a hide at the tanning bench in town';
     if (!f.craft) return 'Craft something at the tanning bench';
     if (!f.sold) return 'Sell your goods to the merchant';
-    for (const z of ZONE_ORDER) if (!f['seen_' + z] && z !== 'greenhollow') return S.level >= ZONES[z].rank ? `Take the wagon to ${ZONES[z].name}` : `Reach Hunter Rank ${ZONES[z].rank} to open the road to ${ZONES[z].name}`;
+    for (const z of ZONE_ORDER) if (!f['seen_' + z] && z !== 'greenhollow') return lvl('hunting') >= ZONES[z].rank ? `Take the wagon to ${ZONES[z].name}` : `Reach Hunting ${ZONES[z].rank} to open the road to ${ZONES[z].name}`;
     if (!S.legends.includes('oldrime')) return 'Find Old Rime in the high snows of Frostfang';
     return 'You are a legend. The hunt goes on.';
   }
@@ -106,7 +127,12 @@ export class Game {
     if (info.part === 'head') dmg *= 2.2 + dead;
     else if (info.part === 'vital') dmg *= 1.5 + dead;
     if (unaware) dmg *= w.kind === 'thrown' ? 3 : 1.5;
-    // the tundra ox shrugs off frontal body hits
+    // sharpened sticks only really work on small game
+    const feeble = !!w.weak && !a.def.small;
+    if (feeble) {
+      dmg *= 0.25;
+      if (!S.flags.hint_weak) { S.flags.hint_weak = true; G.ui.hint('Your spear barely scratched it. Bigger game needs a <b>bow</b> — the fletcher in Fernwick sells one.', 10); }
+    }
     dmg = Math.round(dmg);
     S.stats.hits++;
     const killed = a.onHit(dmg, info.part, unaware, w.id);
@@ -115,7 +141,7 @@ export class Game {
     G.fx.burst(info.point, 0xb04a3a, crit ? 10 : 6, 2.2, 0.1, 0.45);
     G.fx.burst(info.point, 0xe8dcc8, 5, 1.5, 0.12, 0.6, 2);
     G.ui.hitMarker(killed ? 'kill' : crit ? 'crit' : 'hit');
-    G.ui.damage(info.point, dmg, crit, info.part === 'head' ? 'Headshot' : info.part === 'vital' ? 'Vital' : unaware ? 'Ambush' : '');
+    G.ui.damage(info.point, dmg, crit && !feeble, feeble ? 'Too tough' : info.part === 'head' ? 'Headshot' : info.part === 'vital' ? 'Vital' : unaware ? 'Ambush' : '');
     if (killed) { rumble(0.6, 180); this.onKill(a, s.dist); }
     else if (a.def.legendary) this.onLegendEngage(a);
   }
@@ -123,8 +149,9 @@ export class Game {
     const d = a.def;
     S.kills[d.id] = (S.kills[d.id] ?? 0) + 1;
     S.flags.kill = true;
+    if (!d.small) S.flags.big = true;
     const clean = a.hits === 1;
-    this.gainXp(d.xp * (clean ? 1.25 : 1));
+    this.gainXp('hunting', d.xp * (clean ? 1.25 : 1));
     G.player.stamina = Math.min(maxStamina(), G.player.stamina + 30); // adrenaline
     G.ui.toast(`${d.name} down${clean ? ' — clean kill' : ''}${dist > 45 ? ` (${Math.round(dist)} m)` : ''}`, 'good', 'target');
     for (const c of S.contracts) {
@@ -191,10 +218,11 @@ export class Game {
       S.stats.skinned++;
       S.flags.skin = true;
       audio.play('pickup');
-      this.gainXp(Math.round(d.xp * 0.3) + q * 4);
+      this.gainXp('hunting', Math.round(d.xp * 0.3) + q * 4);
       if (d.id === 'oldrime' && !S.flags.ending) { S.flags.ending = true; setTimeout(() => G.ui.showCredits(), 2500); }
       if (totalWeight() > capacity()) G.ui.hint('You are <b>overburdened</b>. Sell or craft a bigger pack to move freely.', 7);
-      else if (!S.flags.hint_tan) { S.flags.hint_tan = true; G.ui.hint('Bring hides to the <b>tanning bench</b> in town to turn them into leather.', 10); }
+      else if (d.small && !S.flags.trade) G.ui.hint('<b>Old Marn</b>, camped beside your cabin, buys small pelts.', 9);
+      else if (!d.small && !S.flags.hint_tan) { S.flags.hint_tan = true; G.ui.hint('Bring hides to the <b>tanning bench</b> in town to turn them into leather.', 10); }
     });
   }
 
@@ -248,9 +276,10 @@ export class Game {
       res.made.push([pot, n]);
       if (!S.brewed[pot]) res.firsts.push(pot);
       S.brewed[pot] = (S.brewed[pot] ?? 0) + n;
+      if (Math.random() < perk('brewer') * 0.15) { addItem(pot, 1); res.made[res.made.length - 1][1]++; }
       for (const h of new Set(herbs)) if (HERBS[h].ess.includes(e) && !(S.lore[h] ??= []).includes(e)) { S.lore[h].push(e); res.learned.push([h, e]); }
     }
-    if (res.made.length) { audio.play(res.firsts.length ? 'levelup' : 'quest'); this.gainXp(10 * res.made.length + 30 * res.firsts.length + 6 * res.learned.length); }
+    if (res.made.length) { audio.play(res.firsts.length ? 'levelup' : 'quest'); this.gainXp('crafting', 14 * res.made.length + 40 * res.firsts.length + 8 * res.learned.length); }
     else audio.play('error');
     return res;
   }
@@ -258,13 +287,18 @@ export class Game {
     const h = G.zone.herbs[i];
     if (!h || h.taken) return;
     h.taken = true; h.obj.visible = false;
+    h.lure.release();
+    const hc = new THREE.Color(ITEMS[h.id].color).getHex();
+    _v.copy(h.pos).setY(h.pos.y + 0.4);
+    G.fx.burst(_v, hc, 12, 1.8, 0.11, 0.8, 2.5);
+    for (let n = 0; n < 7; n++) { const a = (n / 7) * 6.28; G.fx.emit(h.pos.x + Math.cos(a) * 0.3, h.pos.y + 0.3, h.pos.z + Math.sin(a) * 0.3, Math.cos(a) * 0.3, 1.6 + n * 0.12, Math.sin(a) * 0.3, 1, 0.13, 0xfff6c0, 1, 0.6); }
     addItem(h.id, 1);
     S.picked = S.picked ?? {};
     const rec = S.picked[S.zone]?.day === S.day ? S.picked[S.zone] : (S.picked[S.zone] = { day: S.day, idx: [] });
     rec.idx.push(i);
-    audio.play('pickup', { volume: 0.7 });
+    audio.play('pickup', { volume: 0.7, rate: 1.35 });
     G.ui.toast(`+1 ${ITEMS[h.id].name}`, 'item', h.id);
-    this.gainXp(2);
+    this.gainXp('crafting', 3);
     if (!S.flags.hint_herb) { S.flags.hint_herb = true; G.ui.hint('Herbs hide <b>essences</b>. Mix two or three at a town <b>cauldron</b> to find out what they make.', 10); }
   }
   useTonic() {
@@ -276,10 +310,11 @@ export class Game {
   }
 
   // ---------- trade ----------
-  shopStock(kind: 'merchant' | 'fletcher' | 'fishmonger'): string[] {
+  shopStock(kind: 'merchant' | 'fletcher' | 'fishmonger' | 'trapper'): string[] {
     if (kind === 'fishmonger') return ['rod', 'bait'];
+    if (kind === 'trapper') return hasRod() ? ['bait', 'spear', 'jerky'] : ['bait', 'spear', 'jerky', 'rod0'];
     const zi = zoneIndex(S.zone);
-    const ids = kind === 'merchant' ? ['salt', 'bark', 'thread', 'rivets', 'tonic', 'jerky', 'rod', 'bait'] : ['arrow', 'bolt', 'knife', 'tomahawk', 'javelin'];
+    const ids = kind === 'merchant' ? ['salt', 'bark', 'thread', 'rivets', 'tonic', 'jerky', 'rod', 'bait'] : ['arrow', 'bolt', 'spear', 'knife', 'tomahawk', 'javelin'];
     return ids.filter((id) => (ITEMS[id].minZone ?? 0) <= zi);
   }
   weaponStock(): string[] {
@@ -288,8 +323,8 @@ export class Game {
   }
   buy(id: string, n: number): boolean {
     const it = ITEMS[id];
-    if (id === 'rod' && count('rod') > 0) { G.ui.toast('You already have a pole', 'warn'); audio.play('error'); return false; }
-    if (id === 'rod') n = 1;
+    if ((id === 'rod' || id === 'rod0') && count(id) > 0) { G.ui.toast('You already have one', 'warn'); audio.play('error'); return false; }
+    if (id === 'rod' || id === 'rod0') n = 1;
     if ((id === 'arrow' || id === 'bolt') && count(id) + n > ammoCap()) n = ammoCap() - count(id);
     if (n <= 0) { G.ui.toast('Your quiver is full', 'warn'); audio.play('error'); return false; }
     const cost = buyPrice(id) * n;
@@ -297,6 +332,8 @@ export class Game {
     S.gold -= cost;
     addItem(id, n);
     audio.play('coins');
+    if (id === 'bait' && !S.flags.bait) { S.flags.bait = true; G.ui.hint('You have bait and a rod. Walk to the <b>water’s edge</b> at the pond and press <b>E</b> to cast.', 12); }
+    if (id === 'rod') G.ui.toast('A proper pole — rare fish are in reach', 'good', 'rod');
     const thr = THROWN_BY_AMMO[id];
     if (thr && (!S.slots[2] || WEAPONS[thr].tier > WEAPONS[S.slots[2]].tier)) S.slots[2] = thr;
     return true;
@@ -318,6 +355,10 @@ export class Game {
     const slot = w.kind === 'bow' ? 0 : w.kind === 'crossbow' ? 1 : 2;
     S.slots[slot] = id;
     if (w.kind === 'crossbow') S.flags['xl_' + id] = S.flags['xl_' + id] ?? true;
+    // make sure the weapon is reachable from the hotbar
+    const hb = hotbar(), key = 'w' + slot;
+    if (!hb.includes(key)) { const free = hb.indexOf(''); if (free >= 0) hb[free] = key; }
+    if (w.kind === 'bow' && !S.flags.hint_bow) { S.flags.hint_bow = true; S.active = 0; addItem('arrow', 12); G.ui.toast('+12 Arrows with the bow', 'item', 'arrow'); G.ui.hint('Hold <b>Left Mouse</b> to draw, release to loose. Deer graze the meadows north of town.', 12); }
     audio.play('equip');
   }
   sell(key: string, n: number, mult = 1) {
@@ -328,8 +369,15 @@ export class Game {
     S.gold += v;
     S.stats.earned += v;
     const [id] = splitKey(key);
-    if (ITEMS[id].cat === 'goods') { S.flags.sold = true; this.gainXp(Math.round(v * 0.04)); }
+    if (ITEMS[id].cat === 'goods') { S.flags.sold = true; this.gainXp('crafting', v * 0.06); }
+    if (ITEMS[id].cat === 'fish' && !S.flags.town) { S.flags.town = true; G.ui.hint('Coin in your purse. The <b>fletcher</b> across the square sells a bow that can bring down deer.', 12); }
     audio.play('coins');
+  }
+
+  /** Old Marn pays a fair price for small pelts (town merchants treat raw hides as scraps). */
+  sellPelt(key: string, n: number) {
+    this.sell(key, n, 1 / 0.6);
+    if (!S.flags.trade) { S.flags.trade = true; G.ui.hint('Marn also sells <b>bait</b>. Buy some — there are fish in the pond behind his tent.', 12); }
   }
 
   /** Huntmaster's standing bounty on the region's predators: [species, unclaimed kills, coin each]. */
@@ -345,7 +393,7 @@ export class Game {
     S.gold += total; S.stats.earned += total;
     audio.play('quest');
     G.ui.toast(`Bounty paid: +${total} coin`, 'rare', 'coin');
-    this.gainXp(Math.round(total * 0.15));
+    this.gainXp('hunting', total * 0.15);
   }
 
   // ---------- crafting ----------
@@ -369,11 +417,11 @@ export class Game {
     S.flags.tan = true;
     audio.play('tan');
     G.ui.toast(`${score >= 0.85 ? 'Perfect tan! ' : ''}+${out} ${ITEMS[rule[0]].name}`, score >= 0.85 ? 'rare' : 'item', rule[0]);
-    this.gainXp(4 * n + (score >= 0.85 ? 4 : 0));
+    this.gainXp('crafting', 7 * n + (score >= 0.85 ? 6 : 0));
     return out;
   }
   canCraft(r: RecipeDef): boolean {
-    if (S.level < r.rank) return false;
+    if (lvl('crafting') < r.rank) return false;
     if (r.out.gear && this.ownsGear(r.out.gear)) return false;
     if (r.out.weapon && S.weapons.includes(r.out.weapon)) return false;
     return r.needs.every(([id, n]) => countItem(id) >= n);
@@ -397,7 +445,7 @@ export class Game {
     S.stats.crafted++;
     S.flags.craft = true;
     audio.play('craft');
-    this.gainXp(Math.round(r.xp * (fine ? 1.3 : 1)));
+    this.gainXp('crafting', r.xp * 1.6 * (fine ? 1.3 : 1));
     G.player.refreshBack();
   }
   /** Bench cutscene: stand the hunter at the tanner's bench and let the camera circle. */
@@ -469,12 +517,13 @@ export class Game {
   }
   private fish(at: THREE.Vector3) {
     const p = G.player;
-    if (!removeItem('bait', 1)) { G.ui.toast('No bait — merchants sell it', 'warn', 'bait'); audio.play('error'); return; }
+    if (!removeItem('bait', 1)) { G.ui.toast(S.flags.town ? 'No bait — merchants sell it' : 'No bait — Old Marn sells it', 'warn', 'bait'); audio.play('error'); return; }
     p.yaw = Math.atan2(at.x - p.pos.x, at.z - p.pos.z);
     p.crouching = false;
     p.cine = { angle: p.yaw + 2.5, anim: 'Fishing_Cast', dist: 4.6, bobber: at };
     G.ui.startFishing({
-      fish: FISH[S.zone], luck: Math.min(1, S.level / 14) + (buff('angler') ? 1.5 : 0), quick: buff('angler'),
+      fish: FISH[S.zone], luck: Math.min(1, (lvl('fishing') - 1) / 12) + perk('lucky') * 0.8 + (buff('angler') ? 1.5 : 0), quick: buff('angler'),
+      crude: !goodRod(), patient: perk('patient'), line: perk('strongline'), water: ZONES[S.zone].waterColor, night: G.env.night,
       onPhase: (anim) => { if (p.cine) p.cine.anim = anim; },
       onDone: (r) => {
         p.cine = null;
@@ -485,7 +534,8 @@ export class Game {
         S.fish[r.fish] = (S.fish[r.fish] ?? 0) + 1;
         G.ui.toast(`${it.name} · ${r.weight} lb`, it.value > 100 ? 'rare' : 'item', r.fish);
         if (r.perfect && Math.random() < 0.5) { addItem('bait', 1); G.ui.toast('Clean catch — bait saved', 'good', 'bait'); }
-        this.gainXp(Math.round(6 + it.value * 0.18));
+        this.gainXp('fishing', 10 + it.value * 0.25 + (r.perfect ? 4 : 0));
+        if (!S.flags.fishc) { S.flags.fishc = true; G.ui.hint('A fine first catch. The merchant in <b>Fernwick</b> pays for fish — follow the road from your cabin (the gold marker on your compass).', 14); }
       },
     });
   }
@@ -519,7 +569,7 @@ export class Game {
     const species = def.spawns.map((s) => SPECIES[s[0]]);
     const giver = ['the Tanners’ Guild', 'a travelling tailor', 'the garrison quartermaster', 'a cobbler', 'the town council', 'a wealthy widow', 'a caravan master'];
     const list: Contract[] = [];
-    const goods = RECIPES.filter((r) => r.section === 'Trade Goods' && r.rank <= S.level + 2);
+    const goods = RECIPES.filter((r) => r.section === 'Trade Goods' && r.rank <= lvl('crafting') + 1);
     for (let i = 0; i < 4; i++) {
       const roll = Math.random();
       const sp = pick(species);
@@ -561,7 +611,7 @@ export class Game {
     S.stats.earned += c.gold;
     audio.play('quest');
     G.ui.toast(`Contract complete: +${c.gold} coin`, 'rare', 'coin');
-    this.gainXp(c.xp);
+    this.gainXp(c.kind === 'goods' ? 'crafting' : 'hunting', c.xp);
   }
   abandonContract(c: Contract) { S.contracts = S.contracts.filter((o) => o !== c); }
 
@@ -614,8 +664,8 @@ export class Game {
         G.ui.setPrompt(`Gather ${ITEMS[z.herbs[hi].id].name}`, -1, 'E');
         if (input.interactHit()) this.gather(hi);
       } else {
-        const cast = count('rod') > 0 || !S.flags.hint_rod ? this.castPoint() : null;
-        if (cast && count('rod') > 0) {
+        const cast = hasRod() || !S.flags.hint_rod ? this.castPoint() : null;
+        if (cast && hasRod()) {
           G.ui.setPrompt(count('bait') ? 'Cast a line' : 'Cast a line (no bait)', -1, 'E', 'Fishing');
           if (input.interactHit()) this.fish(cast);
         } else {
@@ -629,16 +679,14 @@ export class Game {
       }
     } else G.ui.setPrompt(null);
 
-    // herbs glint so they can be spotted in the grass
-    for (const h of z.herbs) if (!h.taken && Math.random() < dt * 1.6 && h.pos.distanceTo(p.pos) < 38) G.fx.emit(h.pos.x + (Math.random() - 0.5) * 0.4, h.pos.y + 0.5, h.pos.z + (Math.random() - 0.5) * 0.4, 0, 0.5, 0, 1, 0.12, 0xfff8c0, 0.9, 0);
     // contextual hints
     this.hintT -= dt;
     if (this.hintT <= 0) {
       this.hintT = 1;
       if (!S.flags.hint_sneak) {
-        for (const a of G.animals.list) if (a.alive && a.pos.distanceTo(p.pos) < 55) { S.flags.hint_sneak = true; G.ui.hint('Game nearby. Press <b>C</b> to crouch and stalk closer. Hold <b>Left Mouse</b> to draw, release to loose. <b>F</b> slashes with your knife.', 12); break; }
+        for (const a of G.animals.list) if (a.alive && a.pos.distanceTo(p.pos) < 55) { S.flags.hint_sneak = true; G.ui.hint(S.weapons.length ? 'Game nearby. Press <b>C</b> to crouch and stalk closer. Hold <b>Left Mouse</b> to draw, release to loose.' : 'Game nearby. Press <b>C</b> to crouch and creep close, hold <b>Right Mouse</b> to aim, then <b>Left Mouse</b> to throw a spear.', 12); break; }
       }
-      if (!S.flags.hint_move && S.stats.playtime > 2) { S.flags.hint_move = true; G.ui.hint('<b>WASD</b> to move, <b>Shift</b> to sprint, mouse to look. The hunting grounds lie north, past the well.', 10); }
+      if (!S.flags.hint_move && S.stats.playtime > 2) { S.flags.hint_move = true; G.ui.hint(S.flags.town ? '<b>WASD</b> to move, <b>Shift</b> to sprint, mouse to look.' : '<b>WASD</b> to move, <b>Shift</b> to sprint, mouse to look. Rabbits and squirrels feed in the grass around your cabin.', 10); }
     }
 
     // music + ambience

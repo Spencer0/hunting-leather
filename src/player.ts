@@ -6,7 +6,7 @@ import { G } from './ctx';
 import { WEAPONS, type WeaponDef } from './data';
 import { GRAV, Projectiles } from './projectiles';
 import { input, rumble } from './input';
-import { S, activeWeapon, buff, capacity, count, defense, drawMult, gear, maxHp, maxStamina, perk, settings, stealthMult, totalWeight } from './state';
+import { S, activeWeapon, buff, capacity, count, defense, drawMult, gear, goodRod, lvl, maxHp, maxStamina, perk, settings, stealthMult, totalWeight } from './state';
 import { WATER_Y, edgeDist } from './terrain';
 import { angleDiff, clamp, damp, dampAngle, lerp } from './util';
 import { CHAR_SCALE } from './world';
@@ -185,7 +185,7 @@ export class Player {
       o.scale.setScalar(inv * (w.modelScale ?? 1));
       this.handR.add(o);
     } else {
-      o.scale.setScalar(inv * (w.id === 'thr3' ? 0.7 : 0.8));
+      o.scale.setScalar(inv * (w.id === 'thr3' ? 0.7 : w.id === 'thr0' ? 0.56 : 0.8));
       this.handR.add(o);
     }
     this.weaponObj = o;
@@ -367,7 +367,7 @@ export class Player {
       this.meleeT += dt;
       if (!this.meleeDone && this.meleeT > 0.15) {
         this.meleeDone = true;
-        const dmg = 16 + gear('knife').tier * 12 + S.level * 1.5;
+        const dmg = 16 + gear('knife').tier * 12 + lvl('hunting') * 1.5;
         for (const a of G.animals.list) {
           if (!a.alive) continue;
           const d = a.pos.distanceTo(this.pos) - a.radius;
@@ -427,6 +427,7 @@ export class Player {
       pole.position.y = 1.1;
       const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 8), new THREE.MeshLambertMaterial({ color: 0x55504a }));
       reel.rotation.z = Math.PI / 2; reel.position.set(0.05, 0.15, 0);
+      reel.name = 'reel';
       this.rod.add(pole, reel);
       this.rod.traverse((o) => { o.frustumCulled = false; o.castShadow = true; });
       this.handR.add(this.rod);
@@ -437,6 +438,8 @@ export class Player {
     }
     if (!this.rod || !this.bobber || !this.line) return;
     this.rod.visible = on; this.bobber.visible = on; this.line.visible = on;
+    const reel = this.rod.getObjectByName('reel'); if (reel) reel.visible = goodRod();
+    this.rod.rotation.z = goodRod() ? 0 : 0.12;
     if (this.weaponObj) this.weaponObj.visible = !on && !(this.meleeT >= 0 && this.weaponObj.parent === this.handR);
     if (!on) return;
     const b = this.cine!.bobber!, bite = this.cine!.anim !== 'Fishing_Idle' && this.cine!.anim !== 'Fishing_Cast';

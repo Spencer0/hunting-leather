@@ -4,7 +4,7 @@ import { Animals } from './animals';
 import { ALL_MODELS, loadModels } from './assets';
 import { audio } from './audio';
 import { G } from './ctx';
-import { ZONES } from './data';
+import { SKILL_ORDER, ZONES } from './data';
 import { Environment } from './env';
 import { Fx } from './fx';
 import { Game } from './game';
@@ -73,9 +73,10 @@ async function start(slot: number, save: Save | null, name: string) {
   setSave(save ?? newSave(name), slot);
   if (dev.has('auto')) {
     if (dev.get('z')) S.zone = dev.get('z')!;
-    if (dev.get('lvl')) S.level = +dev.get('lvl')!;
+    if (dev.get('lvl')) for (const k of SKILL_ORDER) S.skills[k].lv = +dev.get('lvl')!;
+    if (dev.has('skip')) for (const f of ['kill', 'skin', 'trade', 'bait', 'fishc', 'town', 'big']) S.flags[f] = true;
     if (dev.get('h')) S.time = +dev.get('h')!;
-    if (dev.has('rich')) { S.gold = 9999; for (const k of ['hide_deer:1', 'hide_fox:2', 'leather_light', 'leather_sturdy', 'salt', 'thread', 'meat', 'bolt', 'tomahawk']) addItem(k, 12); S.weapons.push('xbow1'); S.slots = ['bow1', 'xbow1', 'thr1']; }
+    if (dev.has('rich')) { S.gold = 9999; for (const k of ['hide_deer:1', 'hide_fox:2', 'leather_light', 'leather_sturdy', 'salt', 'thread', 'meat', 'bolt', 'tomahawk']) addItem(k, 12); S.weapons.push('bow1', 'xbow1'); S.slots = ['bow1', 'xbow1', 'thr1']; S.active = 0; S.hotbar = ['w0', 'w1', 'w2', 'tonic', 'jerky']; for (const k of ['arrow', 'knife']) addItem(k, 12); }
   }
   G.game.loadZone(S.zone);
   S.hp = Math.min(S.hp, maxHp());
@@ -84,7 +85,7 @@ async function start(slot: number, save: Save | null, name: string) {
   G.game.playing = true;
   ui.showHud(true);
   if (fresh && !dev.has('auto')) {
-    await ui.fade(true, 0, 'Fernwick, Greenhollow Vale', 'Your father left you three things: an ash shortbow, a chipped knife, and a name the Tanners’ Guild still remembers. Time to earn it back.');
+    await ui.fade(true, 0, 'A cabin outside Fernwick', 'A handful of sharpened sticks, a crooked fishing rod and a chipped knife. Every hunter in Greenhollow started with less.');
     await new Promise((r) => setTimeout(r, 5200));
   }
   await ui.fade(false, 1.2);

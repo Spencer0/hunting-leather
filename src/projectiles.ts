@@ -4,6 +4,7 @@ import { model } from './assets';
 import { audio } from './audio';
 import { G } from './ctx';
 import { ITEMS, type WeaponDef } from './data';
+import { Lure } from './lure';
 import { S, addItem, ammoCap, count, perk } from './state';
 import { WATER_Y } from './terrain';
 import { CHAR_SCALE } from './world';
@@ -12,12 +13,13 @@ import type { Animal } from './animals';
 export interface Shot {
   obj: THREE.Object3D; pos: THREE.Vector3; vel: THREE.Vector3; weapon: WeaponDef; power: number; age: number; spin: number; unaware: boolean; dist: number;
 }
-interface Pickup { obj: THREE.Object3D; ammo: string; pos: THREE.Vector3; t: number; broken: boolean }
+interface Pickup { obj: THREE.Object3D; ammo: string; pos: THREE.Vector3; t: number; broken: boolean; lure: Lure | null; pull: number; from: THREE.Vector3 }
+const shaft = (ammo: string) => ammo === 'javelin' || ammo === 'spear';
 
 export const GRAV = 7.5;
 const FWD_Z = new THREE.Vector3(0, 0, 1), FWD_Y = new THREE.Vector3(0, 1, 0);
 const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _dir = new THREE.Vector3(), _q2 = new THREE.Quaternion(), _x = new THREE.Vector3(1, 0, 0);
-const AMMO_MODEL: Record<string, string> = { arrow: 'arrow_bow', bolt: 'arrow_crossbow', knife: 'dagger', tomahawk: 'axe_1handed', javelin: 'spear_A' };
+const AMMO_MODEL: Record<string, string> = { arrow: 'arrow_bow', bolt: 'arrow_crossbow', knife: 'dagger', tomahawk: 'axe_1handed', javelin: 'spear_A', spear: 'spear_A' };
 const streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
 const streakGeo = new THREE.PlaneGeometry(0.03, 2.2);
 
@@ -28,7 +30,7 @@ export class Projectiles {
 
   private make(ammo: string) {
     const o = model('weapons/' + AMMO_MODEL[ammo]);
-    o.scale.setScalar(CHAR_SCALE * (ammo === 'javelin' ? 0.72 : ammo === 'tomahawk' ? 0.8 : 1));
+    o.scale.setScalar(CHAR_SCALE * (ammo === 'javelin' ? 0.72 : ammo === 'spear' ? 0.58 : ammo === 'tomahawk' ? 0.8 : 1));
     return o;
   }
   private orient(o: THREE.Object3D, dir: THREE.Vector3, ammo: string, spin = 0) {
@@ -80,7 +82,9 @@ export class Projectiles {
     else s.obj.quaternion.setFromUnitVectors(FWD_Y, _dir);
     audio.play(kind === 'wood' ? 'hit_wood' : 'hit_ground', { pos: point, volume: 0.7 });
     G.fx.burst(point, kind === 'wood' ? 0x8a6a48 : G.zone.def.snow ? 0xffffff : 0x9a8a60, 6, 1.6, 0.09, 0.4);
-    this.pickups.push({ obj: s.obj, ammo, pos: point.clone(), t: broken ? 12 : 240, broken });
+    let lure: Lure | null = null;
+    if (!broken) { lure = new Lure(0xffd870, 'drop'); lure.group.position.copy(point); this.group.add(lure.group); }
+    this.pickups.push({ obj: s.obj, ammo, pos: point.clone(), t: broken ? 12 : 240, broken, lure, pull: -1, from: new THREE.Vector3() });
     G.animals.disturb(point, 14, 0.45);
   }
 
@@ -131,7 +135,7 @@ export class Projectiles {
       }
       s.obj.position.copy(s.pos);
       _dir.copy(s.vel).normalize();
-      if (s.weapon.kind === 'thrown' && s.weapon.ammo !== 'javelin') {
+      if (s.weapon.kind === 'thrown' && !shaft(s.weapon.ammo)) {
         s.spin += dt * 22;
         s.obj.quaternion.setFromUnitVectors(FWD_Z, _dir);
         s.obj.children[0].quaternion.setFromAxisAngle(_x, s.spin + Math.PI / 2);
@@ -139,27 +143,42 @@ export class Projectiles {
         s.obj.quaternion.setFromUnitVectors(FWD_Y, _dir);
       } else s.obj.quaternion.setFromUnitVectors(FWD_Z, _dir);
     }
-    // pickups
+    // pickups: a twinkle marks each one; walk close and it leaps into your hand
     const pp = G.player.pos;
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const p = this.pickups[i];
       p.t -= dt;
-      if (p.t <= 0) { p.obj.removeFromParent(); this.pickups.splice(i, 1); continue; }
-      if (!p.broken && Math.random() < dt * 1.2 && Math.hypot(p.pos.x - pp.x, p.pos.z - pp.z) < 45) G.fx.emit(p.pos.x, p.pos.y + 0.5, p.pos.z, 0, 0.5, 0, 0.9, 0.14, 0xfff0a0, 0.9, 0);
-      if (!p.broken && Math.hypot(p.pos.x - pp.x, p.pos.z - pp.z) < 1.5 && Math.abs(p.pos.y - pp.y) < 2.6) {
-        const capped = (p.ammo === 'arrow' || p.ammo === 'bolt') && count(p.ammo) >= ammoCap();
-        if (capped) continue;
+      const d = Math.hypot(p.pos.x - pp.x, p.pos.z - pp.z);
+      p.lure?.update(G.time, d, dt);
+      if (p.t <= 0) { p.obj.removeFromParent(); p.lure?.dispose(); this.pickups.splice(i, 1); continue; }
+      if (p.broken) continue;
+      if (p.pull < 0) {
+        if (d < 2.3 && Math.abs(p.pos.y - pp.y) < 3) {
+          if ((p.ammo === 'arrow' || p.ammo === 'bolt') && count(p.ammo) >= ammoCap()) continue;
+          p.pull = 0; p.from.copy(p.obj.position); p.lure?.release();
+        }
+        continue;
+      }
+      p.pull += dt * 4.5;
+      const k = Math.min(1, p.pull), e = k * k;
+      _p.set(pp.x, pp.y + 1.0, pp.z);
+      p.obj.position.lerpVectors(p.from, _p, e);
+      p.obj.position.y += Math.sin(k * Math.PI) * 0.7;
+      p.obj.rotation.y += dt * 14;
+      p.obj.scale.setScalar(1 - e * 0.6);
+      if (k >= 1) {
         addItem(p.ammo, 1);
-        audio.play('pickup', { volume: 0.5 });
+        audio.play('pickup', { volume: 0.5, rate: 1.25 });
+        for (let n = 0; n < 8; n++) { const a = (n / 8) * 6.28; G.fx.emit(_p.x, _p.y, _p.z, Math.cos(a) * 1.4, 1.2 + Math.random(), Math.sin(a) * 1.4, 0.5, 0.11, 0xfff0a0, 1, 3); }
         G.ui.toast(`+1 ${ITEMS[p.ammo].name}`, 'item', p.ammo);
-        p.obj.removeFromParent();
+        p.obj.removeFromParent(); p.lure?.dispose();
         this.pickups.splice(i, 1);
       }
     }
   }
   clear() {
     for (const s of this.shots) s.obj.removeFromParent();
-    for (const p of this.pickups) p.obj.removeFromParent();
+    for (const p of this.pickups) { p.obj.removeFromParent(); p.lure?.dispose(); }
     this.shots.length = 0; this.pickups.length = 0;
   }
 }

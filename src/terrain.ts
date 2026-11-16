@@ -15,6 +15,7 @@ export interface Terrain {
   h: Float32Array; // (N+1)^2 heights
   splat: Float32Array; // (N+1)^2 * 3
   town: THREE.Vector3;
+  home?: THREE.Vector3; // the hunter's cabin (Greenhollow only)
   lair: THREE.Vector3;
   lakes: { x: number; z: number; r: number }[];
   roads: [number, number][][];
@@ -125,12 +126,20 @@ export function buildTerrain(zone: ZoneDef): Terrain {
   const lairAng = r() < 0.5 ? -1 : 1;
   const lair = new THREE.Vector3(lairAng * (95 + r() * 40), 0, -128 - r() * 25);
   const lakes: Terrain['lakes'] = [];
-  const nLakes = zone.id === 'greenhollow' ? 3 : zone.id === 'sunscar' ? 1 : 2;
+  // Greenhollow: the hunter's cabin stands off to one side of town, with its own pond
+  let home: THREE.Vector3 | undefined;
+  if (zone.id === 'greenhollow') {
+    const side = town.x > 0 ? -1 : 1;
+    home = new THREE.Vector3(town.x + side * 104, 0, town.z - 34);
+    lakes.push({ x: home.x + side * 20, z: home.z - 36, r: 12 });
+  }
+  const nLakes = zone.id === 'greenhollow' ? 4 : zone.id === 'sunscar' ? 1 : 2;
   let guard = 0;
   while (lakes.length < nLakes && guard++ < 200) {
     const x = (r() - 0.5) * 300, z = -150 + r() * 220, rad = (zone.id === 'sunscar' ? 14 : 18) + r() * 14;
     if (Math.hypot(x - town.x, z - town.z) < TOWN_R + rad + 40) continue;
     if (Math.hypot(x - lair.x, z - lair.z) < rad + 36) continue;
+    if (home && Math.hypot(x - home.x, z - home.z) < rad + 44) continue;
     if (lakes.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + rad + 30)) continue;
     lakes.push({ x, z, r: rad });
   }
@@ -154,7 +163,12 @@ export function buildTerrain(zone: ZoneDef): Terrain {
     wob(hub, [lair.x * 0.75, lair.z + 26], 2),
     wob(hub, [-lair.x * 0.8, -110], 3),
   ];
-  lakes.slice(0, 2).forEach((l, i) => {
+  if (home) {
+    const pond = lakes[0], pd = Math.hypot(pond.x - home.x, pond.z - home.z);
+    roads.push(wob([home.x, home.z], [town.x, town.z], 8));
+    roads.push([[home.x, home.z], [home.x + ((pond.x - home.x) / pd) * (pd - pond.r - 2), home.z + ((pond.z - home.z) / pd) * (pd - pond.r - 2)]]);
+  }
+  lakes.slice(home ? 1 : 0, home ? 3 : 2).forEach((l, i) => {
     const d = Math.hypot(l.x - hub[0], l.z - hub[1]);
     roads.push(wob(hub, [l.x + ((hub[0] - l.x) / d) * (l.r + 4), l.z + ((hub[1] - l.z) / d) * (l.r + 4)], 4 + i));
   });
@@ -183,6 +197,8 @@ export function buildTerrain(zone: ZoneDef): Terrain {
   };
   const townY = Math.max(base + 1.2, rawH(town.x, town.z));
   town.y = townY;
+  const homeY = home ? Math.max(base + 1.0, rawH(home.x, home.z)) : 0;
+  if (home) home.y = homeY;
   for (let j = 0; j < V; j++) {
     for (let i = 0; i < V; i++) {
       const x = -WORLD / 2 + i * CELL, z = -WORLD / 2 + j * CELL;
@@ -193,6 +209,7 @@ export function buildTerrain(zone: ZoneDef): Terrain {
       // town plateau
       const td = Math.hypot(x - town.x, z - town.z);
       y = lerp(y, townY, smooth(TOWN_R + 34, TOWN_R + 4, td));
+      if (home) y = lerp(y, homeY, smooth(24, 9, Math.hypot(x - home.x, z - home.z)));
       // lair clearing
       const ld = Math.hypot(x - lair.x, z - lair.z);
       if (ld < 40) y = lerp(y, rawH(lair.x, lair.z) + 1, smooth(40, 14, ld) * 0.8);
@@ -235,6 +252,7 @@ export function buildTerrain(zone: ZoneDef): Terrain {
       const pd = pathDist(x, z);
       const td = Math.hypot(x - town.x, z - town.z);
       let path = Math.max(smooth(3.4, 1.2, pd + (noise.n(x * 0.3, z * 0.3) - 0.5) * 1.6), smooth(TOWN_R - 6, TOWN_R - 14, td + (noise.n(x * 0.2, z * 0.2) - 0.5) * 8) * 0.95);
+      if (home) path = Math.max(path, smooth(15, 9, Math.hypot(x - home.x, z - home.z) + (noise.n(x * 0.25, z * 0.25) - 0.5) * 4) * 0.9);
       // shoreline mud / beach
       const shore = smooth(WATER_Y + 0.7, WATER_Y + 0.15, y);
       path = Math.max(path, shore);
@@ -309,6 +327,7 @@ export function buildTerrain(zone: ZoneDef): Terrain {
     const pd = pathDist(x, z);
     if (pd < 6 || pd > 16 || !walkable(x, z)) continue;
     if (Math.hypot(x - town.x, z - town.z) < 110 || Math.hypot(x - lair.x, z - lair.z) < 60) continue;
+    if (home && Math.hypot(x - home.x, z - home.z) < 80) continue;
     if (camps.some((c) => c.distanceTo(new THREE.Vector3(x, c.y, z)) < 120)) continue;
     normal(x, z, tmp);
     if (tmp.y < 0.97) continue;
@@ -346,6 +365,6 @@ export function buildTerrain(zone: ZoneDef): Terrain {
     const fi = clamp(Math.round((x + WORLD / 2) / CELL), 0, N), fj = clamp(Math.round((z + WORLD / 2) / CELL), 0, N);
     return splat[(fj * V + fi) * 3 + 1];
   };
-  return { zone, h, splat, town, lair, lakes, roads, camps, mesh, height, normal, pathAt, walkable, mapCanvas };
+  return { zone, h, splat, town, home, lair, lakes, roads, camps, mesh, height, normal, pathAt, walkable, mapCanvas };
 }
 export const MAP_SPAN = PLAY * 2 + 24;
