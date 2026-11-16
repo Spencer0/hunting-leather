@@ -266,7 +266,8 @@ export class Animal {
       const night = G.env.night;
       const see = (p.crouching ? 14 : 34) * this.def.senses * (1 - 0.35 * night) * (front ? 1 : 0.4) * (p.moving ? 1 : 0.75);
       const hear = 24 * p.noise * this.def.senses;
-      const range = Math.max(see, hear, 2.6);
+      // deer are never caught napping at arm's length: they sense anything inside a short spear throw
+      const range = Math.max(see, hear, this.def.behaviour === 'prey' ? 11.5 : 2.6);
       if (d < range) this.meter += dt * (0.12 + 1.5 * (1 - d / range)) * (1 - perk('lightstep') * 0.15);
       else this.meter -= dt * 0.22;
     } else this.meter -= dt * 0.22;

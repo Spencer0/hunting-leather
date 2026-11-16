@@ -238,7 +238,7 @@ item('meat', 'Game Meat', 'meat', 7, 1, 'meat', '#c0504a', 'Fresh cuts. Sells an
 // Supplies
 item('arrow', 'Arrow', 'ammo', 1, 0.05, 'arrow', '#d8c8a0', 'A fletched hunting arrow.', 3);
 item('bolt', 'Bolt', 'ammo', 2, 0.08, 'bolt', '#b8b8c0', 'A short, heavy crossbow bolt.', 5);
-item('spear', 'Throwing Spear', 'ammo', 1, 0.3, 'spear', '#b89868', 'A fire-hardened stick. Good for rabbits, not much else.', 3);
+item('spear', 'Throwing Spear', 'ammo', 1, 0.3, 'spear', '#b89868', 'A fire-hardened stick. Heavy, slow, and short of reach.', 3);
 item('knife', 'Throwing Knife', 'ammo', 4, 0.2, 'knife', '#c8d0d8', 'Balanced for the throw. Quiet and quick.', 9);
 item('tomahawk', 'Tomahawk', 'ammo', 10, 0.6, 'axe', '#a8b0b8', 'A hatchet weighted to bite deep.', 24, 1);
 item('javelin', 'Javelin', 'ammo', 18, 1, 'spear', '#c8b088', 'A long throwing spear for big game.', 42, 2);
@@ -358,7 +358,6 @@ export interface WeaponDef {
   time: number; // draw / reload / wind-up seconds
   ammo: string; model: string; price: number; zone: number; // sold from zone index
   desc: string; color: string; modelScale?: number;
-  weak?: boolean; // only really hurts small game
 }
 export const WEAPONS: Record<string, WeaponDef> = {
   bow1: { id: 'bow1', name: 'Ash Shortbow', kind: 'bow', tier: 1, damage: 24, speed: 52, time: 0.8, ammo: 'arrow', model: 'bow_withString', price: 60, zone: 0, desc: 'A plain ash bow. Light draw, short reach — but it will drop a deer.', color: '#c8a070' },
@@ -370,7 +369,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   xbow2: { id: 'xbow2', name: 'Heavy Crossbow', kind: 'crossbow', tier: 2, damage: 96, speed: 95, time: 2.9, ammo: 'bolt', model: 'crossbow_2handed', price: 1100, zone: 1, desc: 'Drops a stag where it stands.', color: '#806040' },
   xbow3: { id: 'xbow3', name: 'Siege Arbalest', kind: 'crossbow', tier: 3, damage: 165, speed: 110, time: 3.5, ammo: 'bolt', model: 'crossbow_2handed', price: 3200, zone: 2, desc: 'Steel prod, windlass, and no mercy.', color: '#6a7078', modelScale: 1.2 },
   xbow4: { id: 'xbow4', name: 'Ironhorn Arbalest', kind: 'crossbow', tier: 4, damage: 240, speed: 120, time: 3.2, ammo: 'bolt', model: 'crossbow_2handed', price: 0, zone: 9, desc: 'The prod is a single grey horn. It hums when spanned.', color: '#b8bcc4', modelScale: 1.25 },
-  thr0: { id: 'thr0', name: 'Throwing Spears', kind: 'thrown', tier: 0, damage: 10, speed: 27, time: 0.42, ammo: 'spear', model: 'spear_A', price: 0, zone: 0, desc: 'Sharpened sticks. Fine for rabbits and squirrels; a deer barely feels them.', color: '#b89868', weak: true },
+  thr0: { id: 'thr0', name: 'Throwing Spears', kind: 'thrown', tier: 0, damage: 10, speed: 9, time: 0.6, ammo: 'spear', model: 'spear_A', price: 0, zone: 0, desc: 'Sharpened sticks: slow to throw and they fall short past ten paces. Fine for rabbits; a deer will be gone before you are close enough.', color: '#b89868' },
   thr1: { id: 'thr1', name: 'Throwing Knives', kind: 'thrown', tier: 1, damage: 18, speed: 30, time: 0.3, ammo: 'knife', model: 'dagger', price: 0, zone: 0, desc: 'Silent. Triple damage on unaware prey.', color: '#c8d0d8' },
   thr2: { id: 'thr2', name: 'Tomahawks', kind: 'thrown', tier: 2, damage: 46, speed: 28, time: 0.42, ammo: 'tomahawk', model: 'axe_1handed', price: 0, zone: 1, desc: 'Heavy, spinning, decisive.', color: '#a8b0b8' },
   thr3: { id: 'thr3', name: 'Javelins', kind: 'thrown', tier: 3, damage: 92, speed: 34, time: 0.55, ammo: 'javelin', model: 'spear_A', price: 0, zone: 2, desc: 'For game that does not notice knives.', color: '#c8b088' },
@@ -473,7 +472,7 @@ export const TIPS = [
   'Crouch to move quietly. An animal that has not noticed you takes far more damage.',
   'Aim for the head or just behind the shoulder. A clean kill means a better hide.',
   'Every extra arrow you put in an animal ruins a little more of its hide.',
-  'Thrown weapons deal triple damage to unaware prey. Spears are only good for small game.',
+  'Thrown weapons deal triple damage to unaware prey. Spears are clumsy and short-ranged — fine for small game.',
   'Hunting, fishing and crafting each level up on their own, and each has its own skills to learn.',
   'Crossbows hit hard and fly flat, but take a long time to span.',
   'Raw hides sell poorly. Tan them, craft them, then sell where the price is best.',

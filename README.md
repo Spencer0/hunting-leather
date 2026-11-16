@@ -22,7 +22,7 @@ day/night, generative music, save slots and gamepad support.
 You begin at a cabin outside Fernwick with a handful of throwing spears and a crooked fishing rod. Rabbits and
 squirrels feed in the grass around it; Old Marn, the trapper camped next door, buys their pelts and sells bait;
 the pond behind his tent has fish; and the road leads to town, where fish become coin and coin becomes a bow.
-Spears only really hurt small game — deer need that bow.
+Spears are slow and fall short past ten paces, so deer are gone before you are in range — they need that bow.
 
 1. **Hunt** — stalk game with bows, crossbows and thrown weapons. Crouch to stay unseen; an unaware animal
    takes far more damage. Head and heart shots count.

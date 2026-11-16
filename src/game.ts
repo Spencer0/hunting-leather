@@ -127,12 +127,6 @@ export class Game {
     if (info.part === 'head') dmg *= 2.2 + dead;
     else if (info.part === 'vital') dmg *= 1.5 + dead;
     if (unaware) dmg *= w.kind === 'thrown' ? 3 : 1.5;
-    // sharpened sticks only really work on small game
-    const feeble = !!w.weak && !a.def.small;
-    if (feeble) {
-      dmg *= 0.25;
-      if (!S.flags.hint_weak) { S.flags.hint_weak = true; G.ui.hint('Your spear barely scratched it. Bigger game needs a <b>bow</b> — the fletcher in Fernwick sells one.', 10); }
-    }
     dmg = Math.round(dmg);
     S.stats.hits++;
     const killed = a.onHit(dmg, info.part, unaware, w.id);
@@ -141,7 +135,7 @@ export class Game {
     G.fx.burst(info.point, 0xb04a3a, crit ? 10 : 6, 2.2, 0.1, 0.45);
     G.fx.burst(info.point, 0xe8dcc8, 5, 1.5, 0.12, 0.6, 2);
     G.ui.hitMarker(killed ? 'kill' : crit ? 'crit' : 'hit');
-    G.ui.damage(info.point, dmg, crit && !feeble, feeble ? 'Too tough' : info.part === 'head' ? 'Headshot' : info.part === 'vital' ? 'Vital' : unaware ? 'Ambush' : '');
+    G.ui.damage(info.point, dmg, crit, info.part === 'head' ? 'Headshot' : info.part === 'vital' ? 'Vital' : unaware ? 'Ambush' : '');
     if (killed) { rumble(0.6, 180); this.onKill(a, s.dist); }
     else if (a.def.legendary) this.onLegendEngage(a);
   }
@@ -684,7 +678,7 @@ export class Game {
     if (this.hintT <= 0) {
       this.hintT = 1;
       if (!S.flags.hint_sneak) {
-        for (const a of G.animals.list) if (a.alive && a.pos.distanceTo(p.pos) < 55) { S.flags.hint_sneak = true; G.ui.hint(S.weapons.length ? 'Game nearby. Press <b>C</b> to crouch and stalk closer. Hold <b>Left Mouse</b> to draw, release to loose.' : 'Game nearby. Press <b>C</b> to crouch and creep close, hold <b>Right Mouse</b> to aim, then <b>Left Mouse</b> to throw a spear.', 12); break; }
+        for (const a of G.animals.list) if (a.alive && a.pos.distanceTo(p.pos) < 55) { S.flags.hint_sneak = true; G.ui.hint(S.weapons.length ? 'Game nearby. Press <b>C</b> to crouch and stalk closer. Hold <b>Left Mouse</b> to draw, release to loose.' : 'Game nearby. Press <b>C</b> to crouch and creep close, hold <b>Right Mouse</b> to aim, then <b>Left Mouse</b> to throw a spear. Spears are slow and fall short past ten paces.', 12); break; }
       }
       if (!S.flags.hint_move && S.stats.playtime > 2) { S.flags.hint_move = true; G.ui.hint(S.flags.town ? '<b>WASD</b> to move, <b>Shift</b> to sprint, mouse to look.' : '<b>WASD</b> to move, <b>Shift</b> to sprint, mouse to look. Rabbits and squirrels feed in the grass around your cabin.', 10); }
     }
